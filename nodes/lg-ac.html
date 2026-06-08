@@ -1,45 +1,59 @@
 <script type="text/javascript">
   (function () {
     // Shared helper to fill an AC device <select> from the account admin endpoint.
+    // The select is only (re)populated when a response arrives, and a per-select
+    // token makes overlapping/repeated calls (e.g. several 'change' events) safe:
+    // stale responses are ignored, so options never accumulate or duplicate.
     window.lgAcLoadDevices = function (selectId, statusId, savedValue) {
       var accId = $('#node-input-account').val();
       var sel = $('#' + selectId);
       var statusEl = statusId ? $('#' + statusId) : null;
-      sel.empty();
 
-      function addOption(id, label) {
-        sel.append($('<option></option>').val(id).text(label));
+      var token = (parseInt(sel.attr('data-load-token') || '0', 10) + 1);
+      sel.attr('data-load-token', token);
+      function isStale() { return String(sel.attr('data-load-token')) !== String(token); }
+
+      function fill(options, selectValue) {
+        sel.empty();
+        options.forEach(function (o) {
+          sel.append($('<option></option>').val(o.id).text(o.label));
+        });
+        if (selectValue) { sel.val(selectValue); }
       }
 
       if (!accId || accId === '_ADD_') {
-        addOption(savedValue || '', savedValue ? '(saved) ' + savedValue : 'Select an account first');
-        if (savedValue) { sel.val(savedValue); }
+        fill([{ id: savedValue || '', label: savedValue ? '(saved) ' + savedValue : 'Select an account first' }], savedValue);
         return;
       }
 
       if (statusEl) { statusEl.css('color', '#777').text('Loading devices...'); }
       $.getJSON('lg-account/' + accId + '/devices')
         .done(function (devices) {
-          var acs = (devices || []).filter(function (d) { return d.type === 401; });
+          if (isStale()) { return; }
+          var seen = {};
+          var acs = (devices || []).filter(function (d) {
+            if (d.type !== 401 || seen[d.id]) { return false; }
+            seen[d.id] = true;
+            return true;
+          });
+          var options;
           if (!acs.length) {
-            addOption(savedValue || '', 'No air conditioners found');
+            options = [{ id: savedValue || '', label: 'No air conditioners found' }];
           } else {
-            acs.forEach(function (d) {
-              addOption(d.id, d.name + (d.online ? '' : ' (offline)'));
+            options = acs.map(function (d) {
+              return { id: d.id, label: d.name + (d.online ? '' : ' (offline)') };
             });
-          }
-          if (savedValue) {
-            if (!acs.some(function (d) { return d.id === savedValue; })) {
-              addOption(savedValue, '(saved) ' + savedValue);
+            if (savedValue && !seen[savedValue]) {
+              options.push({ id: savedValue, label: '(saved) ' + savedValue });
             }
-            sel.val(savedValue);
           }
+          fill(options, savedValue);
           if (statusEl) { statusEl.text(''); }
         })
         .fail(function (xhr) {
+          if (isStale()) { return; }
           var err = (xhr.responseJSON && xhr.responseJSON.error) || xhr.statusText;
-          addOption(savedValue || '', savedValue ? '(saved) ' + savedValue : 'Could not load');
-          if (savedValue) { sel.val(savedValue); }
+          fill([{ id: savedValue || '', label: savedValue ? '(saved) ' + savedValue : 'Could not load' }], savedValue);
           if (statusEl) { statusEl.css('color', '#a94442').text(err); }
         });
     };
