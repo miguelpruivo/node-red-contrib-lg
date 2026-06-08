@@ -127,6 +127,9 @@ all `lg-ac-status` nodes.
 - **MAC** — the TV's MAC address. **Required to turn the TV on** via Wake-on-LAN.
 - **Broadcast** — usually `255.255.255.255` (or your subnet broadcast, e.g. `192.168.1.255`).
 - **Secure** — leave off to try `ws://…:3000` first; enable for TVs that require `wss://…:3001`.
+- **Reconnect** — retry interval (seconds, default 5) used while the TV is off. On/off
+  detection is event-driven (an off is detected almost immediately); this interval is how
+  quickly an **off → on** transition is noticed. Lower it for snappier detection.
 
 On the TV, enable **Settings → General → Mobile TV On** (and keep **Quick Start+** on) so
 Wake-on-LAN works while the TV is in standby.

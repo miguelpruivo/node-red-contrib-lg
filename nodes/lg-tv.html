@@ -6,7 +6,8 @@
       host: { value: '', required: true },
       mac: { value: '' },
       broadcast: { value: '255.255.255.255' },
-      secure: { value: false }
+      secure: { value: false },
+      reconnect: { value: 5, validate: RED.validators.number() }
     },
     label: function () {
       return this.name || ('LG TV (' + (this.host || '?') + ')');
@@ -32,6 +33,11 @@
     <input type="text" id="node-config-input-broadcast" placeholder="255.255.255.255" style="width:160px">
   </div>
   <div class="form-row">
+    <label for="node-config-input-reconnect"><i class="fa fa-refresh"></i> Reconnect</label>
+    <input type="number" id="node-config-input-reconnect" min="1" style="width:80px"> seconds
+    <span style="color:#999; margin-left:8px;">Retry interval while the TV is off (how fast turn-on is detected)</span>
+  </div>
+  <div class="form-row">
     <label for="node-config-input-secure"><i class="fa fa-lock"></i> Secure</label>
     <input type="checkbox" id="node-config-input-secure" style="display:inline-block; width:auto; vertical-align:top;">
     <span style="color:#999;">Use wss://...:3001 (newer TVs). Leave off to try ws://...:3000 first.</span>
@@ -53,4 +59,11 @@
         <code>&lt;userDir&gt;/node-red-contrib-lg/</code>.</li>
   </ol>
   <p>If the connection fails with a reset error, enable <b>Secure</b>.</p>
+
+  <h3>Detection speed</h3>
+  <p>On/off detection is event-driven: while the TV is on, an off is detected
+  almost immediately. While the TV is off, the node retries connecting every
+  <b>Reconnect</b> seconds (default 5), so a turn-on is detected within that
+  interval. Lower it for snappier turn-on detection, raise it to be gentler on
+  the network.</p>
 </script>

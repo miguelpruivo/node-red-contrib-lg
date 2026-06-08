@@ -13,7 +13,8 @@
     "host": "192.168.1.50",
     "mac": "AA:BB:CC:DD:EE:FF",
     "broadcast": "255.255.255.255",
-    "secure": false
+    "secure": false,
+    "reconnect": 5
   },
   {
     "id": "inj-tv-on",
