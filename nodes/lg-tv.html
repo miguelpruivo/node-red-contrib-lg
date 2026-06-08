@@ -11,6 +11,14 @@
     },
     label: function () {
       return this.name || ('LG TV (' + (this.host || '?') + ')');
+    },
+    oneditprepare: function () {
+      // Backfill the default for nodes created before this field existed,
+      // so the Reconnect field never shows blank.
+      var rc = $('#node-config-input-reconnect');
+      if (!rc.val()) {
+        rc.val(5);
+      }
     }
   });
 </script>
