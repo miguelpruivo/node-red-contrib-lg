@@ -36,6 +36,12 @@ module.exports = function (RED) {
       node.warn(`Accept the pairing request on TV "${config.name || node.host}"`);
     });
 
+    // Routine connection failures (e.g. TV is off / unreachable) are expected;
+    // log them at debug level so they never surface as fatal errors.
+    node.tv.on('error', (err) => {
+      node.debug(`webOS TV "${config.name || node.host}": ${err && err.message ? err.message : err}`);
+    });
+
     node.tv.start();
 
     node.on('close', (done) => {

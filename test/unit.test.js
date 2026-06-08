@@ -5,7 +5,7 @@ const assert = require('node:assert');
 
 const ac = require('../lib/thinq/ac');
 const wol = require('../lib/webos/wol');
-const { interpretPowerState } = require('../lib/webos/tv');
+const { interpretPowerState, WebosTv } = require('../lib/webos/tv');
 
 test('parseSnapshot reads temperature even when AC is off', () => {
   const snapshot = {
@@ -66,4 +66,15 @@ test('interpretPowerState maps webOS responses', () => {
   assert.strictEqual(interpretPowerState({ state: 'Suspend' }), 'Off');
   assert.strictEqual(interpretPowerState({ state: 'Active Standby' }), 'Pixel Refresher');
   assert.strictEqual(interpretPowerState(null), 'Off');
+});
+
+test('WebosTv._emitError never throws when nobody listens (offline TV cannot crash NR)', () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'offline' });
+  // No 'error' listener attached: must NOT throw (Node would otherwise crash).
+  assert.doesNotThrow(() => tv._emitError(new Error('connect EHOSTUNREACH')));
+  // With a listener it should still deliver the error.
+  let received = null;
+  tv.on('error', (e) => { received = e; });
+  tv._emitError(new Error('boom'));
+  assert.strictEqual(received.message, 'boom');
 });
