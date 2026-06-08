@@ -1,0 +1,57 @@
+<script type="text/javascript">
+  RED.nodes.registerType('lg-tv-control', {
+    category: 'LG',
+    color: '#a6bbcf',
+    defaults: {
+      name: { value: '' },
+      tv: { value: '', type: 'lg-tv', required: true },
+      action: { value: 'msg' }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-television',
+    label: function () {
+      var a = this.action && this.action !== 'msg' ? ' (' + this.action + ')' : '';
+      return this.name || ('LG TV' + a);
+    }
+  });
+</script>
+
+<script type="text/html" data-template-name="lg-tv-control">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name">
+  </div>
+  <div class="form-row">
+    <label for="node-input-tv"><i class="fa fa-television"></i> TV</label>
+    <input type="text" id="node-input-tv">
+  </div>
+  <div class="form-row">
+    <label for="node-input-action"><i class="fa fa-bolt"></i> Action</label>
+    <select id="node-input-action" style="width:200px">
+      <option value="msg">From msg.payload</option>
+      <option value="on">Always turn on</option>
+      <option value="off">Always turn off</option>
+      <option value="toggle">Toggle</option>
+    </select>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="lg-tv-control">
+  <p>Turn an LG webOS TV on or off.</p>
+  <p>Turning <b>on</b> uses Wake-on-LAN (the TV's MAC must be configured and
+  "Mobile TV On" enabled). Turning <b>off</b> uses the webOS API.</p>
+
+  <h3>Input</h3>
+  <dl class="message-properties">
+    <dt>payload<span class="property-type">bool | string</span></dt>
+    <dd>When Action is "From msg.payload": <code>true</code>/<code>"on"</code>,
+        <code>false</code>/<code>"off"</code>, or <code>"toggle"</code>.</dd>
+  </dl>
+
+  <h3>Output</h3>
+  <dl class="message-properties">
+    <dt>payload<span class="property-type">object</span></dt>
+    <dd><code>{ power, state, connected }</code> after the action settles.</dd>
+  </dl>
+</script>

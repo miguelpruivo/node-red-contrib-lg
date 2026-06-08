@@ -1,0 +1,10 @@
+node_modules/
+npm-debug.log*
+.DS_Store
+*.log
+.env
+.idea/
+.vscode/
+coverage/
+# Local scratch / secrets used only while testing
+test/.secrets.json

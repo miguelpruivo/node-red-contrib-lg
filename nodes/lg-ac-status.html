@@ -1,0 +1,90 @@
+<script type="text/javascript">
+  RED.nodes.registerType('lg-ac-status', {
+    category: 'LG',
+    color: '#a6bbcf',
+    defaults: {
+      name: { value: '' },
+      account: { value: '', type: 'lg-account', required: true },
+      deviceId: { value: '' },
+      emitPeriodic: { value: true },
+      emitOnChange: { value: true },
+      includeRaw: { value: false }
+    },
+    inputs: 0,
+    outputs: 1,
+    icon: 'font-awesome/fa-thermometer-half',
+    label: function () {
+      return this.name || 'LG AC status';
+    },
+    oneditprepare: function () {
+      var savedValue = this.deviceId;
+      // Reuse the loader defined by the lg-ac node.
+      window.lgAcLoadDevices('node-input-deviceId', 'lg-acs-devstatus', savedValue);
+      $('#node-input-account').on('change', function () {
+        window.lgAcLoadDevices('node-input-deviceId', 'lg-acs-devstatus', savedValue);
+      });
+    }
+  });
+</script>
+
+<script type="text/html" data-template-name="lg-ac-status">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name">
+  </div>
+  <div class="form-row">
+    <label for="node-input-account"><i class="fa fa-user"></i> Account</label>
+    <input type="text" id="node-input-account">
+  </div>
+  <div class="form-row">
+    <label for="node-input-deviceId"><i class="fa fa-snowflake-o"></i> AC</label>
+    <select id="node-input-deviceId" style="width:70%"></select>
+  </div>
+  <div class="form-row">
+    <label>&nbsp;</label>
+    <span id="lg-acs-devstatus" style="color:#999;"></span>
+  </div>
+  <hr/>
+  <div class="form-row">
+    <label for="node-input-emitPeriodic"><i class="fa fa-clock-o"></i> Periodic</label>
+    <input type="checkbox" id="node-input-emitPeriodic" style="display:inline-block; width:auto; vertical-align:top;">
+    <span style="color:#999;">Emit on every poll (reports temperature even while off)</span>
+  </div>
+  <div class="form-row">
+    <label for="node-input-emitOnChange"><i class="fa fa-bolt"></i> On change</label>
+    <input type="checkbox" id="node-input-emitOnChange" style="display:inline-block; width:auto; vertical-align:top;">
+    <span style="color:#999;">Emit immediately when the AC turns on/off or changes</span>
+  </div>
+  <div class="form-row">
+    <label for="node-input-includeRaw"><i class="fa fa-code"></i> Raw</label>
+    <input type="checkbox" id="node-input-includeRaw" style="display:inline-block; width:auto; vertical-align:top;">
+    <span style="color:#999;">Include the raw airState snapshot in msg.raw</span>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="lg-ac-status">
+  <p>Listens for state from an LG ThinQ air conditioner and emits it on the
+  output. It uses the account's poller, so it works even when the AC is off
+  (the current room temperature is still reported).</p>
+
+  <h3>Output</h3>
+  <dl class="message-properties">
+    <dt>payload<span class="property-type">object</span></dt>
+    <dd><code>power</code>, <code>mode</code>, <code>currentTemperature</code>,
+        <code>targetTemperature</code>, <code>fanSpeed</code>,
+        <code>humidity</code>, <code>online</code>.</dd>
+    <dt>event<span class="property-type">string</span></dt>
+    <dd><code>initial</code>, <code>change</code> or <code>periodic</code>.</dd>
+    <dt>changed<span class="property-type">array</span></dt>
+    <dd>Which fields changed since the previous reading.</dd>
+    <dt>deviceId / topic<span class="property-type">string</span></dt>
+    <dd>The AC device id.</dd>
+  </dl>
+
+  <h3>Options</h3>
+  <ul>
+    <li><b>Periodic</b> — emit on every poll cycle (see the account's poll interval).</li>
+    <li><b>On change</b> — emit as soon as something changes (on/off, temperature, mode...).</li>
+  </ul>
+  <p>Leave both enabled for a steady heartbeat plus instant change notifications.</p>
+</script>

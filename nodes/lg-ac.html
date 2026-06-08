@@ -1,0 +1,126 @@
+<script type="text/javascript">
+  (function () {
+    // Shared helper to fill an AC device <select> from the account admin endpoint.
+    window.lgAcLoadDevices = function (selectId, statusId, savedValue) {
+      var accId = $('#node-input-account').val();
+      var sel = $('#' + selectId);
+      var statusEl = statusId ? $('#' + statusId) : null;
+      sel.empty();
+
+      function addOption(id, label) {
+        sel.append($('<option></option>').val(id).text(label));
+      }
+
+      if (!accId || accId === '_ADD_') {
+        addOption(savedValue || '', savedValue ? '(saved) ' + savedValue : 'Select an account first');
+        if (savedValue) { sel.val(savedValue); }
+        return;
+      }
+
+      if (statusEl) { statusEl.css('color', '#777').text('Loading devices...'); }
+      $.getJSON('lg-account/' + accId + '/devices')
+        .done(function (devices) {
+          var acs = (devices || []).filter(function (d) { return d.type === 401; });
+          if (!acs.length) {
+            addOption(savedValue || '', 'No air conditioners found');
+          } else {
+            acs.forEach(function (d) {
+              addOption(d.id, d.name + (d.online ? '' : ' (offline)'));
+            });
+          }
+          if (savedValue) {
+            if (!acs.some(function (d) { return d.id === savedValue; })) {
+              addOption(savedValue, '(saved) ' + savedValue);
+            }
+            sel.val(savedValue);
+          }
+          if (statusEl) { statusEl.text(''); }
+        })
+        .fail(function (xhr) {
+          var err = (xhr.responseJSON && xhr.responseJSON.error) || xhr.statusText;
+          addOption(savedValue || '', savedValue ? '(saved) ' + savedValue : 'Could not load');
+          if (savedValue) { sel.val(savedValue); }
+          if (statusEl) { statusEl.css('color', '#a94442').text(err); }
+        });
+    };
+  })();
+
+  RED.nodes.registerType('lg-ac', {
+    category: 'LG',
+    color: '#a6bbcf',
+    defaults: {
+      name: { value: '' },
+      account: { value: '', type: 'lg-account', required: true },
+      deviceId: { value: '' }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-snowflake-o',
+    label: function () {
+      return this.name || 'LG AC';
+    },
+    oneditprepare: function () {
+      var savedValue = this.deviceId;
+      window.lgAcLoadDevices('node-input-deviceId', 'lg-ac-devstatus', savedValue);
+      $('#node-input-account').on('change', function () {
+        window.lgAcLoadDevices('node-input-deviceId', 'lg-ac-devstatus', savedValue);
+      });
+    }
+  });
+</script>
+
+<script type="text/html" data-template-name="lg-ac">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-input-name" placeholder="Name">
+  </div>
+  <div class="form-row">
+    <label for="node-input-account"><i class="fa fa-user"></i> Account</label>
+    <input type="text" id="node-input-account">
+  </div>
+  <div class="form-row">
+    <label for="node-input-deviceId"><i class="fa fa-snowflake-o"></i> AC</label>
+    <select id="node-input-deviceId" style="width:70%"></select>
+  </div>
+  <div class="form-row">
+    <label>&nbsp;</label>
+    <span id="lg-ac-devstatus" style="color:#999;"></span>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="lg-ac">
+  <p>Control an LG ThinQ air conditioner. Send a command on the input; the node
+  sends it, reads the new state back and emits it on the output.</p>
+
+  <h3>Inputs</h3>
+  <dl class="message-properties">
+    <dt>payload<span class="property-type">bool | string | number | object</span></dt>
+    <dd>
+      The command. Accepted forms:
+      <ul>
+        <li><code>true</code> / <code>"on"</code> — turn on</li>
+        <li><code>false</code> / <code>"off"</code> — turn off</li>
+        <li><code>"status"</code> — just read the current state</li>
+        <li>a number, e.g. <code>22</code> — set target temperature</li>
+        <li>a mode name, e.g. <code>"cool"</code>, <code>"heat"</code>, <code>"fan"</code>, <code>"dry"</code>, <code>"auto"</code></li>
+        <li>an object combining several, e.g.
+          <code>{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH" }</code></li>
+      </ul>
+    </dd>
+    <dt class="optional">deviceId<span class="property-type">string</span></dt>
+    <dd>Overrides the configured AC for this message.</dd>
+  </dl>
+
+  <h3>Output</h3>
+  <dl class="message-properties">
+    <dt>payload<span class="property-type">object</span></dt>
+    <dd>The current parsed AC state: <code>power</code>, <code>mode</code>,
+        <code>currentTemperature</code>, <code>targetTemperature</code>,
+        <code>fanSpeed</code>, <code>humidity</code>, <code>online</code>.</dd>
+    <dt>raw<span class="property-type">object</span></dt>
+    <dd>The raw <code>airState.*</code> snapshot from LG.</dd>
+  </dl>
+
+  <h3>Fan values</h3>
+  <p><code>LOW</code>, <code>MID</code>, <code>HIGH</code>, <code>AUTO</code> (or a raw number). Supported values vary by model.</p>
+</script>

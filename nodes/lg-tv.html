@@ -1,0 +1,56 @@
+<script type="text/javascript">
+  RED.nodes.registerType('lg-tv', {
+    category: 'config',
+    defaults: {
+      name: { value: '' },
+      host: { value: '', required: true },
+      mac: { value: '' },
+      broadcast: { value: '255.255.255.255' },
+      secure: { value: false }
+    },
+    label: function () {
+      return this.name || ('LG TV (' + (this.host || '?') + ')');
+    }
+  });
+</script>
+
+<script type="text/html" data-template-name="lg-tv">
+  <div class="form-row">
+    <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-config-input-name" placeholder="e.g. Living room TV">
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-host"><i class="fa fa-television"></i> IP address</label>
+    <input type="text" id="node-config-input-host" placeholder="e.g. 192.168.1.50">
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-mac"><i class="fa fa-ethernet"></i> MAC</label>
+    <input type="text" id="node-config-input-mac" placeholder="AA:BB:CC:DD:EE:FF (needed to turn on)">
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-broadcast"><i class="fa fa-rss"></i> Broadcast</label>
+    <input type="text" id="node-config-input-broadcast" placeholder="255.255.255.255" style="width:160px">
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-secure"><i class="fa fa-lock"></i> Secure</label>
+    <input type="checkbox" id="node-config-input-secure" style="display:inline-block; width:auto; vertical-align:top;">
+    <span style="color:#999;">Use wss://...:3001 (newer TVs). Leave off to try ws://...:3000 first.</span>
+  </div>
+</script>
+
+<script type="text/html" data-help-name="lg-tv">
+  <p>Configuration for a single LG webOS TV. Holds the connection and is shared
+  by <code>lg-tv-control</code> and <code>lg-tv-status</code> nodes.</p>
+
+  <h3>Setup</h3>
+  <ol>
+    <li>Give the TV a static IP on your router and enter it as <b>IP address</b>.</li>
+    <li>Enter the TV's <b>MAC</b> address — required for Wake-on-LAN (turning it on).</li>
+    <li>On the TV enable <i>Settings → General → Mobile TV On / Turn on via Wi-Fi</i>
+        (and keep "Quick Start+" on) so Wake-on-LAN works.</li>
+    <li>On first connection the TV shows a <b>pairing prompt</b> — accept it once.
+        The pairing key is then stored under
+        <code>&lt;userDir&gt;/node-red-contrib-lg/</code>.</li>
+  </ol>
+  <p>If the connection fails with a reset error, enable <b>Secure</b>.</p>
+</script>

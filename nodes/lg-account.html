@@ -1,0 +1,111 @@
+<script type="text/javascript">
+  RED.nodes.registerType('lg-account', {
+    category: 'config',
+    defaults: {
+      name: { value: '' },
+      country: { value: 'US', required: true },
+      language: { value: 'en-US', required: true },
+      pollInterval: { value: 60, required: true, validate: RED.validators.number() }
+    },
+    credentials: {
+      username: { type: 'text' },
+      password: { type: 'password' },
+      refreshToken: { type: 'password' }
+    },
+    label: function () {
+      return this.name || ('LG ThinQ (' + (this.country || '?') + ')');
+    },
+    oneditprepare: function () {
+      var statusEl = $('#lg-account-status');
+
+      $('#lg-account-extract').on('click', function () {
+        var payload = {
+          country: $('#node-config-input-country').val(),
+          language: $('#node-config-input-language').val(),
+          username: $('#node-config-input-username').val(),
+          password: $('#node-config-input-password').val()
+        };
+        if (!payload.username || !payload.password) {
+          statusEl.css('color', '#a94442').text('Please enter username and password first.');
+          return;
+        }
+        statusEl.css('color', '#777').text('Logging in to LG ThinQ ...');
+        $.ajax({
+          url: 'lg-account/token',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify(payload)
+        }).done(function (res) {
+          $('#node-config-input-refreshToken').val(res.refreshToken);
+          var msg = 'Success! Refresh token extracted';
+          if (res.devices && res.devices.length) {
+            msg += ' — found ' + res.devices.length + ' device(s): ' +
+              res.devices.map(function (d) { return d.name; }).join(', ');
+          }
+          msg += '. Click Done and Deploy to save it.';
+          statusEl.css('color', '#3c763d').text(msg);
+        }).fail(function (xhr) {
+          var err = (xhr.responseJSON && xhr.responseJSON.error) || xhr.statusText;
+          statusEl.css('color', '#a94442').text('Failed: ' + err);
+        });
+      });
+    }
+  });
+</script>
+
+<script type="text/html" data-template-name="lg-account">
+  <div class="form-row">
+    <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+    <input type="text" id="node-config-input-name" placeholder="e.g. My LG account">
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-country"><i class="fa fa-globe"></i> Country</label>
+    <input type="text" id="node-config-input-country" placeholder="e.g. US, GB, PT" style="width:120px">
+    <span style="color:#999; margin-left:8px;">ISO country code of your LG account</span>
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-language"><i class="fa fa-language"></i> Language</label>
+    <input type="text" id="node-config-input-language" placeholder="e.g. en-US, pt-PT" style="width:120px">
+  </div>
+  <hr/>
+  <div class="form-row">
+    <label for="node-config-input-username"><i class="fa fa-user"></i> Username</label>
+    <input type="text" id="node-config-input-username" placeholder="LG account email">
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-password"><i class="fa fa-lock"></i> Password</label>
+    <input type="password" id="node-config-input-password" placeholder="LG account password">
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-refreshToken"><i class="fa fa-key"></i> Refresh token</label>
+    <input type="password" id="node-config-input-refreshToken" placeholder="(extracted automatically)">
+  </div>
+  <div class="form-row">
+    <label>&nbsp;</label>
+    <button type="button" class="red-ui-button" id="lg-account-extract">
+      <i class="fa fa-bolt"></i> Extract refresh token / Test
+    </button>
+    <span id="lg-account-status" style="margin-left:10px;"></span>
+  </div>
+  <div class="form-row">
+    <label for="node-config-input-pollInterval"><i class="fa fa-clock-o"></i> Poll interval</label>
+    <input type="number" id="node-config-input-pollInterval" min="10" style="width:80px"> seconds
+  </div>
+</script>
+
+<script type="text/html" data-help-name="lg-account">
+  <p>Configuration for an LG ThinQ account. Holds credentials and shares a single
+  authenticated client + device poller with the AC nodes.</p>
+
+  <h3>How authentication works</h3>
+  <ol>
+    <li>Enter your LG account <b>country</b>, <b>language</b>, <b>username</b> and <b>password</b>.</li>
+    <li>Click <b>Extract refresh token / Test</b> to log in and pull a long-lived
+        refresh token (it is filled into the Refresh token field and saved on Deploy).</li>
+    <li>At runtime the refresh token is also cached to disk
+        (<code>&lt;userDir&gt;/node-red-contrib-lg/</code>) so restarts never need a
+        fresh login.</li>
+  </ol>
+  <p>The <b>Poll interval</b> controls how often every device's state (temperature,
+  power, mode, ...) is refreshed and pushed to <code>lg-ac-status</code> nodes.</p>
+</script>
