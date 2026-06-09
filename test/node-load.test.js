@@ -70,11 +70,18 @@ function makeRED() {
 const NODE_FILES = [
   ['../nodes/lg-account.js', 'lg-account'],
   ['../nodes/lg-ac.js', 'lg-ac'],
-  ['../nodes/lg-ac-status.js', 'lg-ac-status'],
   ['../nodes/lg-tv.js', 'lg-tv'],
-  ['../nodes/lg-tv-control.js', 'lg-tv-control'],
-  ['../nodes/lg-tv-status.js', 'lg-tv-status'],
 ];
+
+// A stub lg-account config node that the merged lg-ac node can subscribe to.
+function stubAccount(opts = {}) {
+  return {
+    devices: opts.devices || {},
+    ensureReady: async () => {},
+    subscribe: () => () => {}, // returns an unsubscribe fn
+    getClient: () => opts.client || {},
+  };
+}
 
 test('all node modules register their type', () => {
   const { RED, registered, adminRoutes } = makeRED();
@@ -112,18 +119,13 @@ test('lg-ac control node sends a query through a stub account', async () => {
   require('../nodes/lg-ac.js')(RED);
 
   const fakeSnapshot = { 'airState.operation': 1, 'airState.tempState.current': 23 };
-  const stubAccount = {
-    getClient: () => ({
-      getDevice: async () => ({ snapshot: fakeSnapshot }),
-    }),
-    ensureReady: async () => {},
-  };
-  RED.nodes._register('acc1', stubAccount);
+  RED.nodes._register('acc1', stubAccount({
+    client: { getDevice: async () => ({ snapshot: fakeSnapshot }) },
+  }));
 
   const node = instantiate('lg-ac', { id: 'ac1', account: 'acc1', deviceId: 'dev1' });
 
   await new Promise((resolve, reject) => {
-    node.on('input', () => {}); // ensure handler exists
     node.emit('input', { payload: 'status' }, (m) => { node._sent = (node._sent || []).concat(m); }, (err) => {
       if (err) { reject(err); } else { resolve(); }
     });
@@ -139,15 +141,12 @@ function runAcControl(payload, getDeviceSnapshot) {
   const { RED, instantiate } = makeRED();
   require('../nodes/lg-ac.js')(RED);
   const sent = [];
-  const stubAccount = {
-    devices: {},
-    ensureReady: async () => {},
-    getClient: () => ({
+  RED.nodes._register('accx', stubAccount({
+    client: {
       getDevice: async () => ({ snapshot: getDeviceSnapshot }),
       sendCommands: async (id, cmds) => { sent.push(cmds); return []; },
-    }),
-  };
-  RED.nodes._register('accx', stubAccount);
+    },
+  }));
   const node = instantiate('lg-ac', { id: 'acx', account: 'accx', deviceId: 'dev1' });
   return new Promise((resolve, reject) => {
     node.emit('input', { payload }, () => {}, (err) => {
@@ -176,29 +175,21 @@ test('lg-ac powering off ignores other settings in the same request', async () =
   assert.strictEqual(cmds[0].dataValue, 0);
 });
 
-test('lg-tv-control node turns a stub TV on', async () => {
-  const { RED, instantiate } = makeRED();
-  require('../nodes/lg-tv-control.js')(RED);
-
-  let turnedOn = false;
-  const stubTv = {
-    turnOn: async () => { turnedOn = true; return { power: true, state: 'On', connected: true }; },
-    turnOff: async () => ({ power: false, state: 'Off', connected: true }),
-    toggle: async () => ({ power: true, state: 'On', connected: true }),
-  };
-  RED.nodes._register('tv1', { getTv: () => stubTv });
-
-  const node = instantiate('lg-tv-control', { id: 'c1', tv: 'tv1', action: 'msg' });
-
-  await new Promise((resolve, reject) => {
-    node.emit('input', { payload: 'on' }, (m) => { node._sent = (node._sent || []).concat(m); }, (err) => {
-      if (err) { reject(err); } else { resolve(); }
-    });
-  });
-
-  assert.ok(turnedOn, 'turnOn was called');
-  assert.strictEqual(node._sent[node._sent.length - 1].payload.power, true);
+test('lg-tv deriveAction maps payloads to on/off/toggle', () => {
+  const mod = require('../nodes/lg-tv.js');
+  assert.strictEqual(mod._deriveAction('on'), 'on');
+  assert.strictEqual(mod._deriveAction(true), 'on');
+  assert.strictEqual(mod._deriveAction('off'), 'off');
+  assert.strictEqual(mod._deriveAction(false), 'off');
+  assert.strictEqual(mod._deriveAction('toggle'), 'toggle');
+  assert.strictEqual(mod._deriveAction({ power: true }), 'on');
+  assert.throws(() => mod._deriveAction('nonsense'));
 });
+
+// Note: instantiating the lg-tv runtime node opens a live websocket connection
+// to the TV, so it is not unit-tested here (it would leave open handles). The
+// module load/registration is covered above, deriveAction is covered here, and
+// the underlying WebosTv behaviour is covered in unit.test.js.
 
 // ---- Optional live (read-only) end-to-end through the account node ----------
 

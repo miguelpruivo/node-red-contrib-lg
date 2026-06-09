@@ -1,9 +1,8 @@
 <script type="text/javascript">
   (function () {
-    // Shared helper to fill an AC device <select> from the account admin endpoint.
-    // The select is only (re)populated when a response arrives, and a per-select
-    // token makes overlapping/repeated calls (e.g. several 'change' events) safe:
-    // stale responses are ignored, so options never accumulate or duplicate.
+    // Fill an AC device <select> from the account admin endpoint. A per-select
+    // token makes overlapping/repeated calls safe (stale responses are ignored),
+    // and devices are de-duplicated by id, so options never accumulate.
     window.lgAcLoadDevices = function (selectId, statusId, savedValue) {
       var accId = $('#node-input-account').val();
       var sel = $('#' + selectId);
@@ -65,7 +64,10 @@
     defaults: {
       name: { value: '' },
       account: { value: '', type: 'lg-account', required: true },
-      deviceId: { value: '' }
+      deviceId: { value: '' },
+      emitPeriodic: { value: true },
+      emitOnChange: { value: true },
+      includeRaw: { value: false }
     },
     inputs: 1,
     outputs: 1,
@@ -100,41 +102,68 @@
     <label>&nbsp;</label>
     <span id="lg-ac-devstatus" style="color:#999;"></span>
   </div>
+  <hr/>
+  <div class="form-row">
+    <label for="node-input-emitPeriodic"><i class="fa fa-clock-o"></i> Periodic</label>
+    <input type="checkbox" id="node-input-emitPeriodic" style="display:inline-block; width:auto; vertical-align:top;">
+    <span style="color:#999;">Emit on every poll (reports temperature even while off)</span>
+  </div>
+  <div class="form-row">
+    <label for="node-input-emitOnChange"><i class="fa fa-bolt"></i> On change</label>
+    <input type="checkbox" id="node-input-emitOnChange" style="display:inline-block; width:auto; vertical-align:top;">
+    <span style="color:#999;">Emit immediately when the AC turns on/off or changes</span>
+  </div>
+  <div class="form-row">
+    <label for="node-input-includeRaw"><i class="fa fa-code"></i> Raw</label>
+    <input type="checkbox" id="node-input-includeRaw" style="display:inline-block; width:auto; vertical-align:top;">
+    <span style="color:#999;">Include the raw airState snapshot in msg.raw</span>
+  </div>
 </script>
 
 <script type="text/html" data-help-name="lg-ac">
-  <p>Control an LG ThinQ air conditioner. Send a command on the input; the node
-  sends it, reads the new state back and emits it on the output.</p>
+  <p>Control <b>and</b> monitor an LG ThinQ air conditioner with a single node.
+  Send commands on the input; the current state is emitted on the output after
+  each command and on every poll cycle (so temperature is reported even while
+  the AC is off).</p>
 
-  <h3>Inputs</h3>
+  <h3>Input (commands)</h3>
   <dl class="message-properties">
     <dt>payload<span class="property-type">bool | string | number | object</span></dt>
     <dd>
-      The command. Accepted forms:
       <ul>
         <li><code>true</code> / <code>"on"</code> — turn on</li>
         <li><code>false</code> / <code>"off"</code> — turn off</li>
-        <li><code>"status"</code> — just read the current state</li>
+        <li><code>"status"</code> — read the current state now</li>
         <li>a number, e.g. <code>22</code> — set target temperature</li>
-        <li>a mode name, e.g. <code>"cool"</code>, <code>"heat"</code>, <code>"fan"</code>, <code>"dry"</code>, <code>"auto"</code></li>
-        <li>an object combining several, e.g.
-          <code>{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH" }</code></li>
+        <li>a mode name: <code>"cool"</code>, <code>"heat"</code>, <code>"fan"</code>, <code>"dry"</code>, <code>"auto"</code></li>
+        <li>an object: <code>{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH" }</code></li>
       </ul>
+      Changing mode/temperature/fan while the AC is off turns it on first;
+      turning it off ignores any other settings in the same message.
     </dd>
     <dt class="optional">deviceId<span class="property-type">string</span></dt>
     <dd>Overrides the configured AC for this message.</dd>
   </dl>
 
-  <h3>Output</h3>
+  <h3>Output (status + results)</h3>
   <dl class="message-properties">
     <dt>payload<span class="property-type">object</span></dt>
-    <dd>The current parsed AC state: <code>power</code>, <code>mode</code>,
-        <code>currentTemperature</code>, <code>targetTemperature</code>,
-        <code>fanSpeed</code>, <code>humidity</code>, <code>online</code>.</dd>
-    <dt>raw<span class="property-type">object</span></dt>
-    <dd>The raw <code>airState.*</code> snapshot from LG.</dd>
+    <dd><code>power</code>, <code>mode</code>, <code>currentTemperature</code>,
+        <code>targetTemperature</code>, <code>fanSpeed</code>,
+        <code>humidity</code>, <code>online</code>.</dd>
+    <dt>event<span class="property-type">string</span></dt>
+    <dd><code>initial</code> / <code>change</code> / <code>periodic</code> (from polling),
+        <code>command</code> (after a control), <code>query</code> (after a "status" request).</dd>
+    <dt>changed<span class="property-type">array</span></dt>
+    <dd>Which fields changed (for poll-driven messages).</dd>
+    <dt>deviceId / topic<span class="property-type">string</span></dt>
+    <dd>The AC device id.</dd>
   </dl>
 
-  <h3>Fan values</h3>
-  <p><code>LOW</code>, <code>MID</code>, <code>HIGH</code>, <code>AUTO</code> (or a raw number). Supported values vary by model.</p>
+  <h3>Options</h3>
+  <ul>
+    <li><b>Periodic</b> — emit on every poll cycle (interval is set on the account node).</li>
+    <li><b>On change</b> — emit as soon as something changes.</li>
+    <li>Disable both to only emit responses to commands you send.</li>
+  </ul>
 </script>

@@ -28,21 +28,55 @@ module.exports = function (RED) {
     const node = this;
     node.account = RED.nodes.getNode(config.account);
     node.deviceId = config.deviceId;
+    node.emitPeriodic = config.emitPeriodic !== false; // default true
+    node.emitOnChange = config.emitOnChange !== false; // default true
+    node.includeRaw = !!config.includeRaw;
 
     if (!node.account) {
       node.status({ fill: 'red', shape: 'ring', text: 'no account' });
-    } else {
-      node.status({});
+      return;
+    }
+    node.status({ fill: 'grey', shape: 'ring', text: 'waiting...' });
+
+    function setAcStatus(parsed) {
+      node.status({
+        fill: parsed.power ? 'green' : 'grey',
+        shape: 'dot',
+        text: (parsed.currentTemperature != null ? parsed.currentTemperature + '°C ' : '') + (parsed.power ? 'on' : 'off'),
+      });
     }
 
+    // -------- status output (driven by the account poller) --------
+    const unsubscribe = node.account.subscribe((evt) => {
+      if (node.deviceId && evt.deviceId !== node.deviceId) {
+        return;
+      }
+      const isChange = evt.changed || evt.first;
+      if (!node.emitPeriodic && !(node.emitOnChange && isChange)) {
+        return;
+      }
+      const reason = evt.first ? 'initial' : (isChange ? 'change' : 'periodic');
+      const msg = {
+        topic: evt.deviceId,
+        deviceId: evt.deviceId,
+        name: evt.name,
+        event: reason,
+        changed: evt.changedKeys,
+        payload: evt.parsed,
+      };
+      if (node.includeRaw) {
+        msg.raw = evt.raw;
+      }
+      node.send(msg);
+      setAcStatus(evt.parsed);
+    });
+
+    // -------- control input --------
     node.on('input', async (msg, send, done) => {
       send = send || node.send.bind(node);
       done = done || ((err) => { if (err) { node.error(err, msg); } });
 
       try {
-        if (!node.account) {
-          throw new Error('No LG ThinQ account configured');
-        }
         const deviceId = msg.deviceId || node.deviceId;
         if (!deviceId) {
           throw new Error('No deviceId configured or provided in msg.deviceId');
@@ -57,11 +91,8 @@ module.exports = function (RED) {
         if (request.query) {
           const device = await client.getDevice(deviceId);
           const parsed = acLib.parseSnapshot(device && device.snapshot);
-          msg.payload = parsed;
-          msg.raw = device && device.snapshot;
-          msg.deviceId = deviceId;
-          send(msg);
-          node.status({ fill: 'green', shape: 'dot', text: statusText(parsed) });
+          emitResult(node, send, msg, deviceId, parsed, device && device.snapshot, 'query');
+          setAcStatus(parsed);
           return done();
         }
 
@@ -96,12 +127,9 @@ module.exports = function (RED) {
         // Read back the resulting state.
         const device = await client.getDevice(deviceId);
         const parsed = acLib.parseSnapshot(device && device.snapshot);
-        msg.payload = parsed;
-        msg.raw = device && device.snapshot;
-        msg.deviceId = deviceId;
         msg.commands = commands.map((c) => c.label);
-        send(msg);
-        node.status({ fill: 'green', shape: 'dot', text: commands.map((c) => c.label).join(' ') });
+        emitResult(node, send, msg, deviceId, parsed, device && device.snapshot, 'command');
+        setAcStatus(parsed);
         return done();
       } catch (err) {
         node.status({ fill: 'red', shape: 'ring', text: String(err.message).slice(0, 28) });
@@ -111,11 +139,23 @@ module.exports = function (RED) {
         return done(err);
       }
     });
+
+    node.on('close', () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    });
   }
 
-  function statusText(parsed) {
-    const t = parsed.currentTemperature != null ? parsed.currentTemperature + '°C ' : '';
-    return t + (parsed.power ? 'on' : 'off');
+  function emitResult(node, send, msg, deviceId, parsed, raw, event) {
+    msg.payload = parsed;
+    msg.deviceId = deviceId;
+    msg.topic = deviceId;
+    msg.event = event;
+    if (node.includeRaw) {
+      msg.raw = raw;
+    }
+    send(msg);
   }
 
   RED.nodes.registerType('lg-ac', LgAcNode);

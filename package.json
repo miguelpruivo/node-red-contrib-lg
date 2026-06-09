@@ -35,10 +35,7 @@
     "nodes": {
       "lg-account": "nodes/lg-account.js",
       "lg-ac": "nodes/lg-ac.js",
-      "lg-ac-status": "nodes/lg-ac-status.js",
-      "lg-tv": "nodes/lg-tv.js",
-      "lg-tv-control": "nodes/lg-tv-control.js",
-      "lg-tv-status": "nodes/lg-tv-status.js"
+      "lg-tv": "nodes/lg-tv.js"
     }
   },
   "dependencies": {

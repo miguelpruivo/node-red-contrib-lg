@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "LG ThinQ AC example",
     "disabled": false,
-    "info": "Example flow for controlling and monitoring an LG ThinQ air conditioner.\n\n1. Open the 'My LG account' config node and enter your LG credentials, then click 'Extract refresh token / Test'.\n2. Open the lg-ac and lg-ac-status nodes and pick your AC from the dropdown.\n3. Deploy."
+    "info": "Example flow for controlling and monitoring an LG ThinQ air conditioner with a single lg-ac node.\n\n1. Open the 'My LG account' config node and enter your LG credentials, then click 'Extract refresh token / Test'.\n2. Open the lg-ac node and pick your AC from the dropdown.\n3. Deploy.\n\nThe lg-ac node accepts commands on its input and emits the AC state on its output (after each command and on every poll cycle)."
   },
   {
     "id": "lg-account-example",
@@ -28,8 +28,8 @@
     "payload": "on",
     "payloadType": "str",
     "x": 150,
-    "y": 80,
-    "wires": [["ac-control"]]
+    "y": 100,
+    "wires": [["ac-node"]]
   },
   {
     "id": "inj-ac-off",
@@ -45,8 +45,8 @@
     "payload": "off",
     "payloadType": "str",
     "x": 150,
-    "y": 140,
-    "wires": [["ac-control"]]
+    "y": 160,
+    "wires": [["ac-node"]]
   },
   {
     "id": "inj-ac-cool",
@@ -62,8 +62,8 @@
     "payload": "{\"power\":true,\"mode\":\"COOL\",\"temperature\":22,\"fan\":\"HIGH\"}",
     "payloadType": "json",
     "x": 150,
-    "y": 200,
-    "wires": [["ac-control"]]
+    "y": 220,
+    "wires": [["ac-node"]]
   },
   {
     "id": "inj-ac-status",
@@ -79,25 +79,28 @@
     "payload": "status",
     "payloadType": "str",
     "x": 150,
-    "y": 260,
-    "wires": [["ac-control"]]
+    "y": 280,
+    "wires": [["ac-node"]]
   },
   {
-    "id": "ac-control",
+    "id": "ac-node",
     "type": "lg-ac",
     "z": "flow-thinq-example",
     "name": "Living room AC",
     "account": "lg-account-example",
     "deviceId": "",
+    "emitPeriodic": true,
+    "emitOnChange": true,
+    "includeRaw": false,
     "x": 410,
-    "y": 160,
-    "wires": [["dbg-ac-result"]]
+    "y": 190,
+    "wires": [["dbg-ac"]]
   },
   {
-    "id": "dbg-ac-result",
+    "id": "dbg-ac",
     "type": "debug",
     "z": "flow-thinq-example",
-    "name": "AC command result",
+    "name": "AC state & results",
     "active": true,
     "tosidebar": true,
     "console": false,
@@ -105,36 +108,7 @@
     "complete": "payload",
     "targetType": "msg",
     "x": 650,
-    "y": 160,
-    "wires": []
-  },
-  {
-    "id": "ac-status",
-    "type": "lg-ac-status",
-    "z": "flow-thinq-example",
-    "name": "Living room AC status",
-    "account": "lg-account-example",
-    "deviceId": "",
-    "emitPeriodic": true,
-    "emitOnChange": true,
-    "includeRaw": false,
-    "x": 180,
-    "y": 380,
-    "wires": [["dbg-ac-status"]]
-  },
-  {
-    "id": "dbg-ac-status",
-    "type": "debug",
-    "z": "flow-thinq-example",
-    "name": "AC status updates",
-    "active": true,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "payload",
-    "targetType": "msg",
-    "x": 470,
-    "y": 380,
+    "y": 190,
     "wires": []
   }
 ]

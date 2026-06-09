@@ -4,17 +4,7 @@
     "type": "tab",
     "label": "LG webOS TV example",
     "disabled": false,
-    "info": "Example flow for controlling and monitoring an LG webOS TV.\n\n1. Open the 'My LG TV' config node and enter the TV's IP and MAC address.\n2. On the TV, enable Settings -> General -> Mobile TV On so Wake-on-LAN works.\n3. Deploy. The first time, accept the pairing prompt on the TV screen."
-  },
-  {
-    "id": "lg-tv-example",
-    "type": "lg-tv",
-    "name": "My LG TV",
-    "host": "192.168.1.50",
-    "mac": "AA:BB:CC:DD:EE:FF",
-    "broadcast": "255.255.255.255",
-    "secure": false,
-    "reconnect": 5
+    "info": "Example flow for controlling and monitoring an LG webOS TV with a single lg-tv node.\n\n1. Open the lg-tv node and enter the TV's IP and MAC address.\n2. On the TV, enable Settings -> General -> Mobile TV On so Wake-on-LAN works.\n3. Deploy. The first time, accept the pairing prompt on the TV screen.\n\nThe lg-tv node accepts on/off/toggle on its input and emits the TV power state on its output whenever it changes."
   },
   {
     "id": "inj-tv-on",
@@ -30,8 +20,8 @@
     "payload": "on",
     "payloadType": "str",
     "x": 150,
-    "y": 100,
-    "wires": [["tv-control"]]
+    "y": 120,
+    "wires": [["tv-node"]]
   },
   {
     "id": "inj-tv-off",
@@ -47,8 +37,8 @@
     "payload": "off",
     "payloadType": "str",
     "x": 150,
-    "y": 160,
-    "wires": [["tv-control"]]
+    "y": 180,
+    "wires": [["tv-node"]]
   },
   {
     "id": "inj-tv-toggle",
@@ -64,59 +54,38 @@
     "payload": "toggle",
     "payloadType": "str",
     "x": 150,
-    "y": 220,
-    "wires": [["tv-control"]]
+    "y": 240,
+    "wires": [["tv-node"]]
   },
   {
-    "id": "tv-control",
-    "type": "lg-tv-control",
+    "id": "tv-node",
+    "type": "lg-tv",
     "z": "flow-webos-example",
-    "name": "",
-    "tv": "lg-tv-example",
+    "name": "Living room TV",
+    "host": "192.168.1.50",
+    "mac": "AA:BB:CC:DD:EE:FF",
+    "broadcast": "255.255.255.255",
+    "secure": false,
+    "reconnect": 5,
     "action": "msg",
-    "x": 390,
-    "y": 160,
-    "wires": [["dbg-tv-result"]]
-  },
-  {
-    "id": "dbg-tv-result",
-    "type": "debug",
-    "z": "flow-webos-example",
-    "name": "TV control result",
-    "active": true,
-    "tosidebar": true,
-    "console": false,
-    "tostatus": false,
-    "complete": "payload",
-    "targetType": "msg",
-    "x": 620,
-    "y": 160,
-    "wires": []
-  },
-  {
-    "id": "tv-status",
-    "type": "lg-tv-status",
-    "z": "flow-webos-example",
-    "name": "",
-    "tv": "lg-tv-example",
     "emitInitial": true,
-    "x": 160,
-    "y": 320,
-    "wires": [["dbg-tv-status"]]
+    "x": 400,
+    "y": 180,
+    "wires": [["dbg-tv"]]
   },
   {
-    "id": "dbg-tv-status",
+    "id": "dbg-tv",
     "type": "debug",
     "z": "flow-webos-example",
-    "name": "TV on/off events",
+    "name": "TV state & results",
     "active": true,
     "tosidebar": true,
     "console": false,
     "tostatus": false,
     "complete": "payload",
     "targetType": "msg",
-    "x": 410,
-    "y": 320,
+    "x": 630,
+    "y": 180,
     "wires": []
   }
 ]

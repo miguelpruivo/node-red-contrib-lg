@@ -2,10 +2,11 @@
 
 Node-RED nodes to **control and monitor LG ThinQ air conditioners** and **LG webOS TVs**.
 
-- ❄️ **Air conditioners (LG ThinQ)** — turn on/off, set mode / temperature / fan, and read live state.
-- 🌡️ **Periodic AC status** — temperature, power, mode, etc. are reported on a schedule, **even when the AC is off**.
-- 🔔 **AC change events** — get notified the moment an AC is turned on/off or changes.
-- 📺 **TVs (LG webOS)** — turn on (Wake-on-LAN) / off, and get notified when a TV turns on or off.
+- ❄️ **Air conditioners (LG ThinQ)** — one `lg-ac` node: send commands in, get live state out
+  (turn on/off, set mode / temperature / fan).
+- 🌡️ **AC status** — temperature, power, mode, etc. are emitted on a schedule **even when the AC
+  is off**, and the instant anything changes.
+- 📺 **TVs (LG webOS)** — one `lg-tv` node: turn on (Wake-on-LAN) / off / toggle in, on/off events out.
 - 🔑 **Automatic auth** — log in once with your LG account; the refresh token is extracted and saved for reuse.
 
 > Unofficial project. Not affiliated with or endorsed by LG. Use at your own risk.
@@ -22,8 +23,8 @@ npm install node-red-contrib-lg
 
 Or use **Menu → Manage palette → Install** and search for `node-red-contrib-lg`.
 
-Restart Node-RED. Six nodes appear under the **LG** category, plus two config nodes
-(`LG ThinQ account` and `LG TV`).
+Restart Node-RED. Two nodes (`LG AC`, `LG TV`) appear under the **LG** category, plus the
+`LG ThinQ account` config node.
 
 Requires Node.js 18+ and Node-RED 3.0+.
 
@@ -34,13 +35,12 @@ Requires Node.js 18+ and Node-RED 3.0+.
 | Node | Kind | Purpose |
 |------|------|---------|
 | `lg-account` | config | LG ThinQ account + shared device poller |
-| `lg-ac` | control | Send commands to an AC and read its state back |
-| `lg-ac-status` | listener | Emit AC state periodically and/or on change |
-| `lg-tv` | config | A single webOS TV connection |
-| `lg-tv-control` | control | Turn a TV on (Wake-on-LAN) / off / toggle |
-| `lg-tv-status` | listener | Emit when a TV turns on/off |
+| `lg-ac` | in + out | Control an AC **and** emit its state (after commands and on every poll) |
+| `lg-tv` | in + out | Control a webOS TV (on/off/toggle) **and** emit on/off events |
 
-There are ready-made example flows under **Menu → Import → Examples → node-red-contrib-lg**.
+Each device is a single node: wire your commands into its input, and wire its output to read
+state. There are ready-made example flows under
+**Menu → Import → Examples → node-red-contrib-lg**.
 
 ---
 
@@ -64,79 +64,75 @@ How the token is handled:
   username/password login. If the refresh token ever becomes invalid, the node
   automatically logs in again using the stored username/password.
 
-### 2. Control an AC — `lg-ac`
+### 2. Add an AC — `lg-ac`
 
-Pick the account and the AC from the dropdown. Send a message to control it:
+Pick the account and the AC from the dropdown. The single `lg-ac` node both **takes commands on
+its input** and **emits the AC state on its output**.
+
+**Input — commands** (`msg.payload`):
 
 | `msg.payload` | Effect |
 |---------------|--------|
 | `true` / `"on"` | Turn on |
 | `false` / `"off"` | Turn off |
-| `"status"` | Just read the current state |
+| `"status"` | Just read the current state now |
 | `22` (number) | Set target temperature to 22 °C |
 | `"cool"` / `"heat"` / `"fan"` / `"dry"` / `"auto"` | Set mode |
 | `{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH" }` | Set several at once |
 
-An LG AC rejects mode/temperature/fan changes while it is off, so the node
-**automatically turns the AC on first** when you change one of those while it is
-off (and sends the power-on before the other settings, with a short gap so the
-unit is ready). Conversely, turning the AC **off** ignores any other settings in
-the same message. This makes it safe to drive from HomeKit, where power, mode and
-temperature arrive as separate messages.
+An LG AC rejects mode/temperature/fan changes while it is off, so the node **automatically turns
+the AC on first** when you change one of those while it is off (power-on is sent before the other
+settings, with a short gap so the unit is ready). Turning the AC **off** ignores any other settings
+in the same message. This makes it safe to drive from HomeKit, where power, mode and temperature
+arrive as separate messages. Set `msg.deviceId` to target a different AC at runtime.
 
-The node always responds with the **current state** after the command:
-
-```json
-{
-  "online": true,
-  "power": true,
-  "mode": "COOL",
-  "currentTemperature": 23.5,
-  "targetTemperature": 22,
-  "fanSpeed": "HIGH",
-  "humidity": null
-}
-```
-
-`msg.raw` contains the raw `airState.*` snapshot. Set `msg.deviceId` to target a different AC at runtime.
-
-### 3. Monitor an AC — `lg-ac-status`
-
-This node uses the account's poller, so it works whether the AC is on or off:
-
-- **Periodic** (default on) — emits on every poll cycle. Use this to log temperature
-  continuously, even while the AC is idle.
-- **On change** (default on) — emits the instant the AC turns on/off or any value changes.
-
-Output `msg`:
+**Output — state** is emitted after every command **and** on each poll cycle:
 
 ```json
 {
   "topic": "<deviceId>",
   "deviceId": "<deviceId>",
   "name": "Living room",
-  "event": "change",          // "initial" | "change" | "periodic"
-  "changed": ["power"],        // which fields changed
-  "payload": { "power": true, "currentTemperature": 23.5, "...": "..." }
+  "event": "change",
+  "changed": ["power"],
+  "payload": {
+    "online": true,
+    "power": true,
+    "mode": "COOL",
+    "currentTemperature": 23.5,
+    "targetTemperature": 22,
+    "fanSpeed": "HIGH",
+    "humidity": null
+  }
 }
 ```
 
-The **poll interval** is set on the account node (default 60 s, minimum 10 s) and is shared by
-all `lg-ac-status` nodes.
+`msg.event` tells you why it was emitted: `initial` / `change` / `periodic` (from polling),
+`command` (after a control), or `query` (after a `"status"` request). Enable **Raw** to also get
+the raw `airState.*` snapshot in `msg.raw`.
+
+Two checkboxes control the polled output: **Periodic** (emit every poll cycle — reports temperature
+even while off) and **On change** (emit the instant something changes). Disable both to only get
+responses to commands you send. The **poll interval** lives on the account node (default 60 s,
+minimum 10 s) and is shared by all `lg-ac` nodes.
 
 ---
 
 ## Quick start — TVs (webOS)
 
-### 1. Configure the TV — `lg-tv`
+The `lg-tv` node is self-contained (no separate config node): it holds the connection, takes
+control commands on its input, and emits on/off events on its output.
+
+### 1. Configure the node — `lg-tv`
 
 - **IP address** — the TV's IP (give it a static lease on your router).
 - **MAC** — the TV's MAC address. **Required to turn the TV on** via Wake-on-LAN.
 - **Broadcast** — usually `255.255.255.255` (or your subnet broadcast, e.g. `192.168.1.255`).
+- **Reconnect** — retry interval (seconds, default 5) used while the TV is off. On/off detection is
+  event-driven (an off is detected almost immediately); this interval is how quickly an
+  **off → on** transition is noticed. Lower it for snappier detection.
 - **Secure** — leave off to try `ws://…:3000` first; enable for TVs that require `wss://…:3001`.
-- **Reconnect** — retry interval (seconds, default 5) used while the TV is off. On/off
-  detection is event-driven (an off is detected almost immediately); this interval is how
-  quickly an **off → on** transition is noticed. Lower it for snappier detection.
+- **Action** — `From msg.payload` (default), or hard-wire `on` / `off` / `toggle`.
 
 On the TV, enable **Settings → General → Mobile TV On** (and keep **Quick Start+** on) so
 Wake-on-LAN works while the TV is in standby.
@@ -144,14 +140,11 @@ Wake-on-LAN works while the TV is in standby.
 **Pairing:** the first time Node-RED connects, the TV shows a pairing prompt — **accept it once**.
 The pairing key is then stored at `<userDir>/node-red-contrib-lg/webos-<nodeId>.key`.
 
-### 2. Control the TV — `lg-tv-control`
+### 2. Use it
 
-Set the **Action** to `From msg.payload` and send `"on"`, `"off"`, or `"toggle"` — or hard-wire
-the action in the node. Output `msg.payload` is `{ power, state, connected }` once the action settles.
+**Input — commands**: with Action set to `From msg.payload`, send `"on"`, `"off"`, or `"toggle"`.
 
-### 3. Monitor the TV — `lg-tv-status`
-
-Emits whenever the TV turns on or off:
+**Output — state** is emitted whenever the TV turns on or off (and after a command):
 
 ```json
 {
@@ -161,8 +154,9 @@ Emits whenever the TV turns on or off:
 }
 ```
 
-Detection uses the webOS power-state subscription when available, and falls back to the
-websocket connection state on older TVs.
+`msg.event` is `on` / `off` for status changes, or `command` right after a control. Detection uses
+the webOS power-state subscription when available, and falls back to the websocket connection state
+on older TVs.
 
 ---
 
@@ -178,6 +172,7 @@ websocket connection state on older TVs.
 AC state changes are detected by polling (default every 60 s, configurable). This is simple and
 reliable and reports temperature even when the unit is off. Real-time MQTT push is intentionally
 left out to keep the plugin dependency-light; a shorter poll interval covers most automations.
+The poller is shared by all `lg-ac` nodes on the same account.
 
 ---
 
