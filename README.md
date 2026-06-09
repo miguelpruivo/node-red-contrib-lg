@@ -173,6 +173,94 @@ on older TVs.
 
 ---
 
+## Command reference
+
+### Air conditioner — `lg-ac`
+
+Send any of these as `msg.payload` on the input. Set `msg.deviceId` to target a different AC than
+the one configured. Changing mode/temperature/fan/vane while the AC is off turns it on first;
+sending an "off" ignores any other settings in the same message.
+
+**Shortcut payloads**
+
+| `msg.payload` | Effect |
+|---|---|
+| `true` / `"on"` | Power on |
+| `false` / `"off"` | Power off |
+| `"status"` (or `msg.topic` = `"status"`) | Read current state, change nothing |
+| a number, e.g. `22` | Set target temperature (°C) |
+| `"cool"` / `"heat"` / `"dry"` / `"fan"` / `"auto"` / `"air_clean"` | Set mode |
+
+**Object payload** — combine any of these fields in one object:
+
+| Field | Accepted values |
+|---|---|
+| `power` | `true` / `false` (also `"on"`, `"off"`, `"start"`, `"stop"`, `1`, `0`) |
+| `mode` | `"COOL"`, `"DRY"`, `"FAN"`, `"HEAT"`, `"AIR_CLEAN"`, `"AUTO"` (case-insensitive) or the numeric value |
+| `temperature` | number in °C (sent as-is; valid range is model-dependent, typically 16–30) |
+| `fan` | `"SLOW"`, `"LOW"`, `"LOW_MID"`, `"MID"`, `"MID_HIGH"`, `"HIGH"`, `"POWER"`, `"AUTO"`, `"NATURE"` or the numeric value |
+| `verticalVane` | `0` = stop, `1`–`6` = fixed position (1 = top), `100` = swing — or `"off"` / `"swing"` |
+| `horizontalVane` | `0` = stop, `1`–`5` = fixed position (1 = left), `100` = swing — or `"off"` / `"swing"` |
+| `swing` | `"vertical"`, `"horizontal"`, `"both"`, `"off"` (shorthand for setting both louvers to swing/stop) |
+| `raw` | `{ "airState.<key>": value, … }` — sends those LG keys verbatim (escape hatch for anything not modelled) |
+
+Example: `{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH", "verticalVane": 1, "horizontalVane": 1 }`
+
+**Numeric value maps** (for `raw` or when sending numbers):
+
+| Mode | # | | Fan | # |
+|---|---|---|---|---|
+| COOL | 0 | | SLOW | 1 |
+| DRY | 1 | | LOW | 2 |
+| FAN | 2 | | LOW_MID | 3 |
+| HEAT | 4 | | MID | 4 |
+| AIR_CLEAN | 5 | | MID_HIGH | 5 |
+| AUTO | 6 | | HIGH | 6 |
+| | | | POWER / AUTO | 8 |
+| | | | NATURE | 16 |
+
+> Which modes / fan speeds / vane positions a unit actually supports is model-dependent; an
+> unsupported value returns an LG `resultCode` error. The authoritative list is the device's model
+> JSON (`modelJsonUri`).
+
+**Output `msg`** (emitted after a command and on every poll / real-time change):
+
+| Field | Description |
+|---|---|
+| `payload` | `{ online, power, mode, modeValue, currentTemperature, targetTemperature, fanSpeed, fanSpeedValue, humidity, energyWatts, verticalVane, horizontalVane }` |
+| `event` | `initial` / `change` / `periodic` (poll) · `command` (after a control) · `query` (after `"status"`) · `change` (real-time MQTT push) |
+| `changed` | array of fields that changed (poll / push) |
+| `deviceId`, `topic` | the AC device id |
+| `raw` | the raw `airState.*` snapshot (only if **Raw** is enabled) |
+| `commands` | labels of the commands that were sent (after a control) |
+
+### TV — `lg-tv`
+
+Set the node's **Action** to `From msg.payload` (default) and send a command, or hard-wire the
+Action to `on` / `off` / `toggle` (then the payload is ignored).
+
+**Input `msg.payload`**
+
+| `msg.payload` | Effect |
+|---|---|
+| `true` / `"on"` / `1` | Turn on (Wake-on-LAN) |
+| `false` / `"off"` / `0` | Turn off |
+| `"toggle"` | Toggle on/off |
+| `{ "power": true }` / `{ "power": false }` | On / off |
+
+> The TV node currently controls **power only** (on / off / toggle). Volume, inputs and app launch
+> are not exposed.
+
+**Output `msg`** (emitted whenever the TV turns on/off and after a command):
+
+| Field | Description |
+|---|---|
+| `payload` | `{ power: boolean, state: string, connected: boolean }` (`state` is the webOS label, e.g. `On`, `Off`) |
+| `event` | `on` / `off` (status change) or `command` (after a control) |
+| `topic` | the TV name |
+
+---
+
 ## How it works
 
 - **ThinQ** uses the (unofficial) LG ThinQ v2 cloud API: a gateway lookup, an OAuth login that
