@@ -5,7 +5,7 @@ Node-RED nodes to **control and monitor LG ThinQ air conditioners** and **LG web
 - ❄️ **Air conditioners (LG ThinQ)** — one `lg-ac` node: send commands in, get live state out
   (turn on/off, set mode / temperature / fan).
 - 🌡️ **AC status** — temperature, power, mode, etc. are emitted on a schedule **even when the AC
-  is off**, and the instant anything changes.
+  is off**, plus **real-time push** so changes made on the AC itself (its remote, the LG app) emit instantly.
 - 📺 **TVs (LG webOS)** — one `lg-tv` node: turn on (Wake-on-LAN) / off / toggle in, on/off events out.
 - 🔑 **Automatic auth** — log in once with your LG account; the refresh token is extracted and saved for reuse.
 
@@ -111,10 +111,15 @@ arrive as separate messages. Set `msg.deviceId` to target a different AC at runt
 `command` (after a control), or `query` (after a `"status"` request). Enable **Raw** to also get
 the raw `airState.*` snapshot in `msg.raw`.
 
-Two checkboxes control the polled output: **Periodic** (emit every poll cycle — reports temperature
-even while off) and **On change** (emit the instant something changes). Disable both to only get
+Two checkboxes control the output: **Periodic** (emit every poll cycle — reports temperature even
+while off) and **On change** (emit the instant something changes). Disable both to only get
 responses to commands you send. The **poll interval** lives on the account node (default 60 s,
 minimum 10 s) and is shared by all `lg-ac` nodes.
+
+**Real-time changes:** with **Real-time** enabled on the account (default on), changes made on the
+AC itself — its remote, the LG ThinQ app, a wall controller — are pushed over MQTT and emitted
+**immediately** (as `event: "change"`), instead of waiting for the next poll. Polling still runs in
+parallel for periodic temperature updates.
 
 ---
 
@@ -166,13 +171,15 @@ on older TVs.
   yields a **refresh token**, and periodic polling of `service/homes` for each device's snapshot.
   AC commands are `control-sync` `Set` calls (`airState.operation`, `airState.opMode`,
   `airState.tempState.target`, `airState.windStrength`).
+- **Real-time updates** use LG's AWS IoT MQTT broker: the plugin requests a client certificate
+  (it generates an RSA key + CSR), connects over mutual-TLS MQTT and subscribes to the account's
+  topics. LG pushes a delta (`{ deviceId, data: { state: { reported } } }`) whenever a device
+  changes, which is merged into the cached snapshot and emitted instantly. The poll runs alongside
+  it for periodic temperature and as a fallback if MQTT is unavailable.
 - **webOS** uses the local WebSocket protocol (via [`lgtv2`](https://www.npmjs.com/package/lgtv2))
   for control and power-state subscription, and a built-in **Wake-on-LAN** magic packet to power on.
 
-AC state changes are detected by polling (default every 60 s, configurable). This is simple and
-reliable and reports temperature even when the unit is off. Real-time MQTT push is intentionally
-left out to keep the plugin dependency-light; a shorter poll interval covers most automations.
-The poller is shared by all `lg-ac` nodes on the same account.
+The poller and the MQTT connection are shared by all `lg-ac` nodes on the same account.
 
 ---
 
@@ -189,8 +196,9 @@ The poller is shared by all `lg-ac` nodes on the same account.
 npm install
 npm test                 # unit + node-load tests (no network)
 
-# Optional read-only live check against a real LG account (never sends control commands):
+# Optional read-only live checks against a real LG account (never send control commands):
 LG_USERNAME=you@example.com LG_PASSWORD=secret LG_COUNTRY=PT LG_LANGUAGE=en-US npm run smoke:thinq
+LG_USERNAME=you@example.com LG_PASSWORD=secret LG_COUNTRY=PT LG_LANGUAGE=en-US npm run smoke:mqtt
 ```
 
 ## Credits

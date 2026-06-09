@@ -5,6 +5,7 @@ const path = require('path');
 const EventEmitter = require('events');
 
 const { ThinQClient } = require('../lib/thinq/client');
+const { ThinQMqtt } = require('../lib/thinq/mqtt');
 const acLib = require('../lib/thinq/ac');
 const { storageDir, makeLogger, diffParsed } = require('../lib/red-helpers');
 
@@ -16,9 +17,11 @@ module.exports = function (RED) {
     node.country = (config.country || 'US').toUpperCase();
     node.language = config.language || 'en-US';
     node.pollInterval = Math.max(parseInt(config.pollInterval, 10) || 60, 10); // seconds, min 10
+    node.realtime = config.realtime !== false; // MQTT push, default on
 
     const creds = node.credentials || {};
     const tokenFile = path.join(storageDir(RED), `thinq-${node.id}.token`);
+    const mqttKeyFile = path.join(storageDir(RED), `thinq-mqtt-${node.id}.json`);
 
     // Persist the refresh token to disk so a restart does not require a fresh
     // username/password login. This is the "extract automatically and save for
@@ -47,6 +50,21 @@ module.exports = function (RED) {
       tokenStore,
       logger: makeLogger(node),
     });
+
+    // Persisted RSA key + CSR for the AWS IoT (MQTT) client certificate, so we
+    // don't regenerate them on every restart.
+    const mqttKeyStore = {
+      load: async () => {
+        try {
+          return JSON.parse(fs.readFileSync(mqttKeyFile, 'utf8'));
+        } catch (e) {
+          return null;
+        }
+      },
+      save: async (keys) => {
+        fs.writeFileSync(mqttKeyFile, JSON.stringify(keys), { mode: 0o600 });
+      },
+    };
 
     node.emitter = new EventEmitter();
     node.emitter.setMaxListeners(0);
@@ -83,6 +101,7 @@ module.exports = function (RED) {
             changed: changedKeys.length > 0 && !first,
             changedKeys,
             first,
+            source: 'poll',
           });
         }
         node.status({ fill: 'green', shape: 'dot', text: `${devices.length} device(s)` });
@@ -103,16 +122,79 @@ module.exports = function (RED) {
 
     node.forcePoll = poll;
 
+    // -------- real-time updates (MQTT push) --------
+    let mqtt = null;
+    let mqttStarting = false;
+    let mqttRetryTimer = null;
+
+    // Apply a pushed delta to the cached snapshot and emit a change event, so
+    // lg-ac nodes react instantly to changes made from the remote / LG app.
+    function applyMqttUpdate(deviceId, reported) {
+      const prev = node.devices[deviceId];
+      const raw = Object.assign({}, prev ? prev.raw : {}, reported);
+      const parsed = acLib.parseSnapshot(raw);
+      const changedKeys = diffParsed(prev ? prev.parsed : null, parsed);
+      node.devices[deviceId] = {
+        device: prev ? prev.device : { deviceId, alias: deviceId },
+        parsed,
+        raw,
+      };
+      node.emitter.emit('snapshot', {
+        deviceId,
+        name: prev ? prev.device.alias : deviceId,
+        deviceType: prev ? prev.device.deviceType : undefined,
+        parsed,
+        raw,
+        changed: changedKeys.length > 0,
+        changedKeys,
+        first: false,
+        source: 'mqtt',
+      });
+    }
+
+    node.startMqtt = async () => {
+      if (!node.realtime || mqtt || mqttStarting) {
+        return;
+      }
+      mqttStarting = true;
+      try {
+        await node.client.ready();
+        mqtt = new ThinQMqtt({
+          client: node.client,
+          keyStore: mqttKeyStore,
+          logger: makeLogger(node),
+          onUpdate: applyMqttUpdate,
+        });
+        await mqtt.start();
+      } catch (err) {
+        node.warn('ThinQ real-time (MQTT) unavailable, using polling only: ' + err.message);
+        if (mqtt) {
+          mqtt.stop();
+          mqtt = null;
+        }
+        // Retry later; polling keeps working in the meantime.
+        if (!mqttRetryTimer) {
+          mqttRetryTimer = setTimeout(() => {
+            mqttRetryTimer = null;
+            node.startMqtt();
+          }, 60000);
+        }
+      } finally {
+        mqttStarting = false;
+      }
+    };
+
     /**
      * Subscribe to per-device snapshot events. Returns an unsubscribe fn.
-     * Polling starts on the first subscriber.
+     * Polling (and MQTT push) start on the first subscriber.
      */
     node.subscribe = (handler) => {
       node.emitter.on('snapshot', handler);
       subscribers += 1;
       node.startPolling();
-      // Replay the most recent snapshots so a freshly deployed status node
-      // immediately gets current values.
+      node.startMqtt();
+      // Replay the most recent snapshots so a freshly deployed node immediately
+      // gets current values.
       for (const id of Object.keys(node.devices)) {
         const entry = node.devices[id];
         handler({
@@ -124,6 +206,7 @@ module.exports = function (RED) {
           changed: false,
           changedKeys: [],
           first: true,
+          source: 'poll',
         });
       }
       return () => {
@@ -137,6 +220,14 @@ module.exports = function (RED) {
         clearInterval(pollTimer);
       }
       pollTimer = null;
+      if (mqttRetryTimer) {
+        clearTimeout(mqttRetryTimer);
+        mqttRetryTimer = null;
+      }
+      if (mqtt) {
+        mqtt.stop();
+        mqtt = null;
+      }
       node.emitter.removeAllListeners();
       done();
     });

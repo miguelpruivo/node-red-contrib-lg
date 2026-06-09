@@ -12,7 +12,8 @@
     "name": "My LG account",
     "country": "US",
     "language": "en-US",
-    "pollInterval": 60
+    "pollInterval": 60,
+    "realtime": true
   },
   {
     "id": "inj-ac-on",

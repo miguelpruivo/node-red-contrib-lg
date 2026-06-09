@@ -175,6 +175,34 @@ test('lg-ac powering off ignores other settings in the same request', async () =
   assert.strictEqual(cmds[0].dataValue, 0);
 });
 
+test('lg-ac emits real-time (mqtt) changes even when periodic is off', () => {
+  const { RED, instantiate } = makeRED();
+  require('../nodes/lg-ac.js')(RED);
+
+  let handler = null;
+  const acct = stubAccount();
+  acct.subscribe = (h) => { handler = h; return () => {}; };
+  RED.nodes._register('acc1', acct);
+
+  const node = instantiate('lg-ac', {
+    id: 'ac1', account: 'acc1', deviceId: 'dev1', emitPeriodic: false, emitOnChange: true,
+  });
+
+  // A real-time push (source 'mqtt') with a relevant change must be emitted.
+  handler({
+    deviceId: 'dev1', name: 'AC', source: 'mqtt', changed: true, changedKeys: ['power'],
+    first: false, parsed: { power: true, currentTemperature: 24 },
+  });
+  assert.strictEqual((node._sent || []).length, 1, 'one real-time message emitted');
+  assert.strictEqual(node._sent[0].event, 'change');
+  assert.strictEqual(node._sent[0].payload.power, true);
+
+  // A periodic poll tick must NOT emit when "periodic" is disabled.
+  node._sent = [];
+  handler({ deviceId: 'dev1', source: 'poll', changed: false, first: false, parsed: { power: true } });
+  assert.strictEqual(node._sent.length, 0, 'no periodic emit when periodic disabled');
+});
+
 test('lg-tv deriveAction maps payloads to on/off/toggle', () => {
   const mod = require('../nodes/lg-tv.js');
   assert.strictEqual(mod._deriveAction('on'), 'on');

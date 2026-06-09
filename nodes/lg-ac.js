@@ -52,10 +52,19 @@ module.exports = function (RED) {
         return;
       }
       const isChange = evt.changed || evt.first;
-      if (!node.emitPeriodic && !(node.emitOnChange && isChange)) {
-        return;
+      let reason;
+      if (evt.source === 'mqtt') {
+        // Real-time push: emit only meaningful changes, never as a periodic tick.
+        if (!node.emitOnChange || !isChange) {
+          return;
+        }
+        reason = 'change';
+      } else {
+        if (!node.emitPeriodic && !(node.emitOnChange && isChange)) {
+          return;
+        }
+        reason = evt.first ? 'initial' : (isChange ? 'change' : 'periodic');
       }
-      const reason = evt.first ? 'initial' : (isChange ? 'change' : 'periodic');
       const msg = {
         topic: evt.deviceId,
         deviceId: evt.deviceId,

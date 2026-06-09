@@ -28,7 +28,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "smoke:thinq": "node test/thinq-smoke.js"
+    "smoke:thinq": "node test/thinq-smoke.js",
+    "smoke:mqtt": "node test/thinq-mqtt-smoke.js"
   },
   "node-red": {
     "version": ">=3.0.0",
@@ -41,6 +42,8 @@
   "dependencies": {
     "axios": "^1.7.0",
     "lgtv2": "^1.6.3",
+    "mqtt": "^5.15.1",
+    "node-forge": "^1.4.0",
     "qs": "^6.12.0"
   }
 }

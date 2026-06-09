@@ -8,3 +8,4 @@ npm-debug.log*
 coverage/
 # Local scratch / secrets used only while testing
 test/.secrets.json
+test/.mqtt-keys.json

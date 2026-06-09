@@ -6,6 +6,7 @@ const assert = require('node:assert');
 const ac = require('../lib/thinq/ac');
 const wol = require('../lib/webos/wol');
 const { interpretPowerState, WebosTv } = require('../lib/webos/tv');
+const { parseMessage, createCsr, generatePrivateKey } = require('../lib/thinq/mqtt');
 
 test('parseSnapshot reads temperature even when AC is off', () => {
   const snapshot = {
@@ -66,6 +67,25 @@ test('interpretPowerState maps webOS responses', () => {
   assert.strictEqual(interpretPowerState({ state: 'Suspend' }), 'Off');
   assert.strictEqual(interpretPowerState({ state: 'Active Standby' }), 'Pixel Refresher');
   assert.strictEqual(interpretPowerState(null), 'Off');
+});
+
+test('mqtt parseMessage extracts deviceId + reported delta', () => {
+  const buf = Buffer.from(JSON.stringify({
+    deviceId: 'dev-1',
+    data: { state: { reported: { 'airState.operation': 1 } } },
+  }));
+  assert.deepStrictEqual(parseMessage(buf), { deviceId: 'dev-1', reported: { 'airState.operation': 1 } });
+  assert.strictEqual(parseMessage(Buffer.from('not json')), null);
+  assert.strictEqual(parseMessage(Buffer.from(JSON.stringify({ deviceId: 'x' }))), null);
+});
+
+test('mqtt CSR is generated from a native key and verifies', async () => {
+  const forge = require('node-forge');
+  const pk = await generatePrivateKey();
+  const csrPem = createCsr(pk);
+  const csr = forge.pki.certificationRequestFromPem(csrPem);
+  assert.ok(csr.verify(), 'CSR signature is valid');
+  assert.strictEqual(csr.subject.getField('CN').value, 'AWS IoT Certificate');
 });
 
 test('WebosTv._emitError never throws when nobody listens (offline TV cannot crash NR)', () => {
