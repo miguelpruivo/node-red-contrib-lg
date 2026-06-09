@@ -91,6 +91,13 @@ Gotchas (do not regress these):
   axios "status code 400".
 - AC reports current room temperature **even while off** — important: polling delivers
   temperature regardless of power state. Don't "optimize" that away.
+- **Vane/louver control**: `airState.wDir.vStep` (vertical) and `airState.wDir.hStep`
+  (horizontal); `0` = stop, `1..N` = fixed position, `100` = swing. `lg-ac` accepts
+  `verticalVane` / `horizontalVane` / `swing` plus a `raw` escape hatch (`{ raw: { "airState.x": n } }`).
+  Valid fixed positions are **model-specific** — the authoritative source is the device's
+  `modelJsonUri` (`Value['airState.wDir.vStep'].value_mapping`), where `@`-prefixed entries are
+  the user-facing values and bare numbers are internal bitmasks. `buildCommands` does not
+  validate against the model (it trusts the value), so document the per-model range instead.
 
 ### Real-time push (MQTT)
 

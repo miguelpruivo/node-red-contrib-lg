@@ -137,6 +137,10 @@
         <li>a number, e.g. <code>22</code> — set target temperature</li>
         <li>a mode name: <code>"cool"</code>, <code>"heat"</code>, <code>"fan"</code>, <code>"dry"</code>, <code>"auto"</code></li>
         <li>an object: <code>{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH" }</code></li>
+        <li>vane direction: <code>{ "verticalVane": 1, "horizontalVane": 1 }</code>
+            (1 = top/left … higher = down/right, <code>"swing"</code> = sweep, <code>"off"</code> = stop; valid positions vary by model)</li>
+        <li>swing shorthand: <code>{ "swing": "both" }</code> (or <code>"vertical"</code> / <code>"horizontal"</code> / <code>"off"</code>)</li>
+        <li>raw escape hatch: <code>{ "raw": { "airState.wDir.vStep": 1 } }</code> for any key this node doesn't model</li>
       </ul>
       Changing mode/temperature/fan while the AC is off turns it on first;
       turning it off ignores any other settings in the same message.
@@ -150,7 +154,8 @@
     <dt>payload<span class="property-type">object</span></dt>
     <dd><code>power</code>, <code>mode</code>, <code>currentTemperature</code>,
         <code>targetTemperature</code>, <code>fanSpeed</code>,
-        <code>humidity</code>, <code>online</code>.</dd>
+        <code>humidity</code>, <code>verticalVane</code>, <code>horizontalVane</code>,
+        <code>online</code>.</dd>
     <dt>event<span class="property-type">string</span></dt>
     <dd><code>initial</code> / <code>change</code> / <code>periodic</code> (from polling),
         <code>command</code> (after a control), <code>query</code> (after a "status" request).</dd>

@@ -51,6 +51,38 @@ test('buildCommands rejects invalid mode', () => {
   assert.throws(() => ac.buildCommands({ mode: 'NONSENSE_MODE' }), /Invalid mode/);
 });
 
+test('buildCommands sets vane positions', () => {
+  const cmds = ac.buildCommands({ verticalVane: 1, horizontalVane: 1 });
+  assert.deepStrictEqual(cmds.map((c) => [c.dataKey, c.dataValue]), [
+    ['airState.wDir.vStep', 1],
+    ['airState.wDir.hStep', 1],
+  ]);
+});
+
+test('buildCommands swing shorthand and "off"/"swing" words', () => {
+  assert.deepStrictEqual(
+    ac.buildCommands({ swing: 'both' }).map((c) => [c.dataKey, c.dataValue]),
+    [['airState.wDir.vStep', 100], ['airState.wDir.hStep', 100]]
+  );
+  assert.deepStrictEqual(
+    ac.buildCommands({ swing: 'off' }).map((c) => [c.dataKey, c.dataValue]),
+    [['airState.wDir.vStep', 0], ['airState.wDir.hStep', 0]]
+  );
+  assert.deepStrictEqual(ac.buildCommands({ verticalVane: 'swing' })[0].dataValue, 100);
+  assert.deepStrictEqual(ac.buildCommands({ verticalVane: 'off' })[0].dataValue, 0);
+});
+
+test('buildCommands raw escape hatch passes keys verbatim', () => {
+  const cmds = ac.buildCommands({ raw: { 'airState.wDir.vStep': 1 } });
+  assert.deepStrictEqual(cmds, [{ dataKey: 'airState.wDir.vStep', dataValue: 1, label: 'airState.wDir.vStep=1' }]);
+});
+
+test('parseSnapshot exposes vane positions', () => {
+  const s = ac.parseSnapshot({ 'airState.wDir.vStep': 1, 'airState.wDir.hStep': 100 });
+  assert.strictEqual(s.verticalVane, 1);
+  assert.strictEqual(s.horizontalVane, 100);
+});
+
 test('wol.parseMac accepts common formats', () => {
   const expected = Buffer.from('aabbccddeeff', 'hex');
   assert.deepStrictEqual(wol.parseMac('AA:BB:CC:DD:EE:FF'), expected);

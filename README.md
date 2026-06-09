@@ -79,6 +79,9 @@ its input** and **emits the AC state on its output**.
 | `22` (number) | Set target temperature to 22 °C |
 | `"cool"` / `"heat"` / `"fan"` / `"dry"` / `"auto"` | Set mode |
 | `{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH" }` | Set several at once |
+| `{ "verticalVane": 1, "horizontalVane": 1 }` | Aim the louvers (1 = top / left … higher = down / right; `"swing"` = sweep; `"off"` = stop) |
+| `{ "swing": "both" }` | Swing shorthand (`"vertical"` / `"horizontal"` / `"both"` / `"off"`) |
+| `{ "raw": { "airState.xxx": n } }` | Escape hatch: send any LG `airState.*` key directly |
 
 An LG AC rejects mode/temperature/fan changes while it is off, so the node **automatically turns
 the AC on first** when you change one of those while it is off (power-on is sent before the other
@@ -102,10 +105,15 @@ arrive as separate messages. Set `msg.deviceId` to target a different AC at runt
     "currentTemperature": 23.5,
     "targetTemperature": 22,
     "fanSpeed": "HIGH",
-    "humidity": null
+    "humidity": null,
+    "verticalVane": 1,
+    "horizontalVane": 1
   }
 }
 ```
+
+Vane positions are raw LG values: `0` = stop, `1..N` = fixed position, `100` = swing. The valid
+fixed positions are model-dependent (e.g. vertical `1`–`6`, horizontal `1`–`5`).
 
 `msg.event` tells you why it was emitted: `initial` / `change` / `periodic` (from polling),
 `command` (after a control), or `query` (after a `"status"` request). Enable **Raw** to also get
