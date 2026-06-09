@@ -77,6 +77,13 @@ Pick the account and the AC from the dropdown. Send a message to control it:
 | `"cool"` / `"heat"` / `"fan"` / `"dry"` / `"auto"` | Set mode |
 | `{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH" }` | Set several at once |
 
+An LG AC rejects mode/temperature/fan changes while it is off, so the node
+**automatically turns the AC on first** when you change one of those while it is
+off (and sends the power-on before the other settings, with a short gap so the
+unit is ready). Conversely, turning the AC **off** ignores any other settings in
+the same message. This makes it safe to drive from HomeKit, where power, mode and
+temperature arrive as separate messages.
+
 The node always responds with the **current state** after the command:
 
 ```json

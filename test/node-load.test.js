@@ -135,6 +135,47 @@ test('lg-ac control node sends a query through a stub account', async () => {
   assert.strictEqual(out.payload.currentTemperature, 23);
 });
 
+function runAcControl(payload, getDeviceSnapshot) {
+  const { RED, instantiate } = makeRED();
+  require('../nodes/lg-ac.js')(RED);
+  const sent = [];
+  const stubAccount = {
+    devices: {},
+    ensureReady: async () => {},
+    getClient: () => ({
+      getDevice: async () => ({ snapshot: getDeviceSnapshot }),
+      sendCommands: async (id, cmds) => { sent.push(cmds); return []; },
+    }),
+  };
+  RED.nodes._register('accx', stubAccount);
+  const node = instantiate('lg-ac', { id: 'acx', account: 'accx', deviceId: 'dev1' });
+  return new Promise((resolve, reject) => {
+    node.emit('input', { payload }, () => {}, (err) => {
+      if (err) { reject(err); } else { resolve(sent[0] || []); }
+    });
+  });
+}
+
+test('lg-ac prepends power-on when changing temperature while AC is off', async () => {
+  const cmds = await runAcControl({ temperature: 22 }, { 'airState.operation': 0 });
+  assert.strictEqual(cmds[0].dataKey, 'airState.operation');
+  assert.strictEqual(cmds[0].dataValue, 1);
+  assert.ok(cmds.some((c) => c.dataKey === 'airState.tempState.target' && c.dataValue === 22));
+});
+
+test('lg-ac does NOT prepend power-on when AC is already on', async () => {
+  const cmds = await runAcControl({ temperature: 22 }, { 'airState.operation': 1 });
+  assert.ok(!cmds.some((c) => c.dataKey === 'airState.operation'));
+  assert.strictEqual(cmds[0].dataKey, 'airState.tempState.target');
+});
+
+test('lg-ac powering off ignores other settings in the same request', async () => {
+  const cmds = await runAcControl({ power: false, temperature: 22 }, { 'airState.operation': 1 });
+  assert.strictEqual(cmds.length, 1);
+  assert.strictEqual(cmds[0].dataKey, 'airState.operation');
+  assert.strictEqual(cmds[0].dataValue, 0);
+});
+
 test('lg-tv-control node turns a stub TV on', async () => {
   const { RED, instantiate } = makeRED();
   require('../nodes/lg-tv-control.js')(RED);
