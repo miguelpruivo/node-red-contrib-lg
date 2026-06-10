@@ -51,6 +51,11 @@ test('buildCommands rejects invalid mode', () => {
   assert.throws(() => ac.buildCommands({ mode: 'NONSENSE_MODE' }), /Invalid mode/);
 });
 
+test('buildCommands rejects fan "AUTO" with a helpful message (no auto fan speed)', () => {
+  assert.throws(() => ac.buildCommands({ fan: 'AUTO' }), /no "AUTO" fan speed/);
+  assert.throws(() => ac.buildCommands({ fan: 'auto' }), /Unsupported fan value/);
+});
+
 test('buildCommands sets vane positions', () => {
   const cmds = ac.buildCommands({ verticalVane: 1, horizontalVane: 1 });
   assert.deepStrictEqual(cmds.map((c) => [c.dataKey, c.dataValue]), [

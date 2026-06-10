@@ -227,6 +227,8 @@ Example: `{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH", "ve
 > is model-dependent; the fan map above is LG's standard enum but some models differ. The
 > authoritative list is the device's model JSON (`modelJsonUri`,
 > `Value['airState.windStrength'].value_mapping`). `LOW` / `MID` / `HIGH` (2 / 4 / 6) are reliable.
+> There is **no `AUTO` fan speed** on typical single-fan units (`AUTO` is an *operation mode*, not a
+> fan setting); sending `fan: "AUTO"` is rejected rather than sent.
 >
 > An unsupported value returns `resultCode 0001`. A **transient** `resultCode 0103` means the unit
 > couldn't apply the command at that moment (busy, or fan speed while in an auto-managed mode, or
