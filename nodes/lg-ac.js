@@ -28,8 +28,8 @@ module.exports = function (RED) {
     const node = this;
     node.account = RED.nodes.getNode(config.account);
     node.deviceId = config.deviceId;
-    node.emitPeriodic = config.emitPeriodic !== false; // default true
-    node.emitOnChange = config.emitOnChange !== false; // default true
+    node.emitPoll = config.emitPoll !== false; // emit on every poll tick, default true
+    node.emitRealtime = config.emitRealtime !== false; // emit on MQTT push, default true
     node.includeRaw = !!config.includeRaw;
 
     if (!node.account) {
@@ -54,13 +54,14 @@ module.exports = function (RED) {
       const isChange = evt.changed || evt.first;
       let reason;
       if (evt.source === 'mqtt') {
-        // Real-time push: emit only meaningful changes, never as a periodic tick.
-        if (!node.emitOnChange || !isChange) {
+        // Real-time push from LG (inherently a change).
+        if (!node.emitRealtime) {
           return;
         }
         reason = 'change';
       } else {
-        if (!node.emitPeriodic && !(node.emitOnChange && isChange)) {
+        // Poll tick: emit every time when poll output is enabled.
+        if (!node.emitPoll) {
           return;
         }
         reason = evt.first ? 'initial' : (isChange ? 'change' : 'periodic');

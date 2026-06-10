@@ -119,15 +119,18 @@ fixed positions are model-dependent (e.g. vertical `1`–`6`, horizontal `1`–`
 `command` (after a control), or `query` (after a `"status"` request). Enable **Raw** to also get
 the raw `airState.*` snapshot in `msg.raw`.
 
-Two checkboxes control the output: **Periodic** (emit every poll cycle — reports temperature even
-while off) and **On change** (emit the instant something changes). Disable both to only get
-responses to commands you send. The **poll interval** lives on the account node (default 60 s,
-minimum 10 s) and is shared by all `lg-ac` nodes.
+Two checkboxes control the output:
 
-**Real-time changes:** with **Real-time** enabled on the account (default on), changes made on the
-AC itself — its remote, the LG ThinQ app, a wall controller — are pushed over MQTT and emitted
-**immediately** (as `event: "change"`), instead of waiting for the next poll. Polling still runs in
-parallel for periodic temperature updates.
+- **Poll** — emit on every poll cycle (a steady heartbeat; always reports the current temperature,
+  even while off). The **poll interval** lives on the account node (default 60 s, minimum 10 s) and
+  is shared by all `lg-ac` nodes.
+- **Real-time** — emit instant MQTT pushes, including changes made on the AC itself (its remote, the
+  LG app). Requires **Real-time** enabled on the account node (the MQTT master switch). Emitted as
+  `event: "change"`.
+
+Disable both to only get responses to commands you send. For **change-only** output, enable
+**Real-time** and disable **Poll** (or add a `filter`/rbe node after this one) — with Poll on you'll
+get a message every cycle whether or not anything changed.
 
 ---
 
