@@ -75,11 +75,16 @@ const NODE_FILES = [
 
 // A stub lg-account config node that the merged lg-ac node can subscribe to.
 function stubAccount(opts = {}) {
+  const client = opts.client || {};
+  // The real client serializes per device; the stub just runs the fn inline.
+  if (!client.withDeviceLock) {
+    client.withDeviceLock = (deviceId, fn) => fn();
+  }
   return {
     devices: opts.devices || {},
     ensureReady: async () => {},
     subscribe: () => () => {}, // returns an unsubscribe fn
-    getClient: () => opts.client || {},
+    getClient: () => client,
   };
 }
 

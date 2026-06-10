@@ -87,6 +87,13 @@ Gotchas (do not regress these):
   first (with `COMMAND_DELAY_MS` spacing); turning off ignores other settings in the same
   message. This makes the HomeKit/NRCHKB bridge work, where power/mode/temp arrive as
   separate messages.
+- **Per-device serialization:** `lg-ac` wraps each device operation in
+  `client.withDeviceLock(deviceId, fn)`. Node-RED runs the node's async `input` handler
+  concurrently, so without this, a rapid sequence (LOW→…→HIGH→AUTO) sends overlapping
+  `control-sync` calls to the same AC — which the unit rejects (`0103`) or reacts to by powering
+  off. The lock makes a sequence behave like the LG app (one change at a time). Different devices
+  run in parallel. The verified example: app sets fan AUTO = `windStrength 8` and stays on; the
+  plugin sending the same value while commands overlapped powered the unit off.
 - LG errors must be surfaced with their `resultCode` (`describeLgError`), not the bare
   axios "status code 400". `resultCode 0103` is **transient** ("device busy / can't apply now",
   common for fan speed after a power/mode change or in auto-managed modes) — `sendCommand` retries

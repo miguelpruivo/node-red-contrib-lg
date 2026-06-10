@@ -97,47 +97,54 @@ module.exports = function (RED) {
 
         // Query only
         if (request.query) {
-          const device = await client.getDevice(deviceId);
-          const parsed = acLib.parseSnapshot(device && device.snapshot);
-          emitResult(node, send, msg, deviceId, parsed, device && device.snapshot, 'query');
-          setAcStatus(parsed);
+          await client.withDeviceLock(deviceId, async () => {
+            const device = await client.getDevice(deviceId);
+            const parsed = acLib.parseSnapshot(device && device.snapshot);
+            emitResult(node, send, msg, deviceId, parsed, device && device.snapshot, 'query');
+            setAcStatus(parsed);
+          });
           return done();
         }
 
-        // Control
+        // Build the control commands (pure — fail fast on bad input).
         const settingCmds = acLib.buildCommands(request);
         if (!settingCmds.length) {
           throw new Error('No AC command found in payload');
         }
 
-        const turningOff = settingCmds.some((c) => c.dataKey === POWER_KEY && c.dataValue === 0);
-        const turningOn = settingCmds.some((c) => c.dataKey === POWER_KEY && c.dataValue === 1);
-        const nonPowerCmds = settingCmds.filter((c) => c.dataKey !== POWER_KEY);
+        // Run the whole control sequence under a per-device lock, so rapid or
+        // concurrent messages to the same AC apply strictly one-at-a-time.
+        // Overlapping control commands can be rejected (0103) or even power the
+        // unit off; serializing makes a sequence behave like the LG app.
+        await client.withDeviceLock(deviceId, async () => {
+          const turningOff = settingCmds.some((c) => c.dataKey === POWER_KEY && c.dataValue === 0);
+          const turningOn = settingCmds.some((c) => c.dataKey === POWER_KEY && c.dataValue === 1);
+          const nonPowerCmds = settingCmds.filter((c) => c.dataKey !== POWER_KEY);
 
-        let commands;
-        if (turningOff) {
-          // Powering off: ignore any other settings in the same request — the AC
-          // would reject them and they make no sense while shutting down.
-          commands = [{ dataKey: POWER_KEY, dataValue: 0, label: 'power=0' }];
-        } else if (nonPowerCmds.length && !turningOn) {
-          // Changing mode/temperature/fan requires the AC to be ON first.
-          const on = await isPoweredOn(node, client, deviceId);
-          commands = on
-            ? nonPowerCmds
-            : [{ dataKey: POWER_KEY, dataValue: 1, label: 'power=1' }, ...nonPowerCmds];
-        } else {
-          commands = settingCmds; // power on (optionally with settings), or power-only
-        }
+          let commands;
+          if (turningOff) {
+            // Powering off: ignore any other settings in the same request.
+            commands = [{ dataKey: POWER_KEY, dataValue: 0, label: 'power=0' }];
+          } else if (nonPowerCmds.length && !turningOn) {
+            // Changing mode/temperature/fan requires the AC to be ON first.
+            const on = await isPoweredOn(node, client, deviceId);
+            commands = on
+              ? nonPowerCmds
+              : [{ dataKey: POWER_KEY, dataValue: 1, label: 'power=1' }, ...nonPowerCmds];
+          } else {
+            commands = settingCmds; // power on (optionally with settings), or power-only
+          }
 
-        node.status({ fill: 'blue', shape: 'dot', text: 'sending...' });
-        await client.sendCommands(deviceId, commands, { delayMs: COMMAND_DELAY_MS });
+          node.status({ fill: 'blue', shape: 'dot', text: 'sending...' });
+          await client.sendCommands(deviceId, commands, { delayMs: COMMAND_DELAY_MS });
 
-        // Read back the resulting state.
-        const device = await client.getDevice(deviceId);
-        const parsed = acLib.parseSnapshot(device && device.snapshot);
-        msg.commands = commands.map((c) => c.label);
-        emitResult(node, send, msg, deviceId, parsed, device && device.snapshot, 'command');
-        setAcStatus(parsed);
+          // Read back the resulting state.
+          const device = await client.getDevice(deviceId);
+          const parsed = acLib.parseSnapshot(device && device.snapshot);
+          msg.commands = commands.map((c) => c.label);
+          emitResult(node, send, msg, deviceId, parsed, device && device.snapshot, 'command');
+          setAcStatus(parsed);
+        });
         return done();
       } catch (err) {
         node.status({ fill: 'red', shape: 'ring', text: String(err.message).slice(0, 28) });

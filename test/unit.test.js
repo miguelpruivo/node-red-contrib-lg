@@ -116,6 +116,39 @@ test('interpretPowerState maps webOS responses', () => {
   assert.strictEqual(interpretPowerState(null), 'Off');
 });
 
+test('withDeviceLock serializes operations for the same device', async () => {
+  const { ThinQClient } = require('../lib/thinq/client');
+  const c = new ThinQClient({});
+  const order = [];
+  const op = (label, ms) => () => new Promise((res) => {
+    order.push('start:' + label);
+    setTimeout(() => { order.push('end:' + label); res(label); }, ms);
+  });
+  const p1 = c.withDeviceLock('dev', op('a', 30));
+  const p2 = c.withDeviceLock('dev', op('b', 1));
+  await Promise.all([p1, p2]);
+  assert.deepStrictEqual(order, ['start:a', 'end:a', 'start:b', 'end:b']);
+});
+
+test('withDeviceLock runs different devices in parallel', async () => {
+  const { ThinQClient } = require('../lib/thinq/client');
+  const c = new ThinQClient({});
+  const order = [];
+  const op = (label, ms) => () => new Promise((res) => {
+    order.push('start:' + label);
+    setTimeout(() => { order.push('end:' + label); res(); }, ms);
+  });
+  await Promise.all([c.withDeviceLock('d1', op('a', 25)), c.withDeviceLock('d2', op('b', 1))]);
+  assert.ok(order.indexOf('start:b') < order.indexOf('end:a'), 'd2 did not wait for d1');
+});
+
+test('withDeviceLock keeps the queue alive after a failing op', async () => {
+  const { ThinQClient } = require('../lib/thinq/client');
+  const c = new ThinQClient({});
+  await assert.rejects(c.withDeviceLock('dev', async () => { throw new Error('boom'); }));
+  assert.strictEqual(await c.withDeviceLock('dev', async () => 'ok'), 'ok');
+});
+
 test('sendCommand retries a transient 0103 and then succeeds', async () => {
   const { ThinQClient } = require('../lib/thinq/client');
   const c = new ThinQClient({});

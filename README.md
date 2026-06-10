@@ -83,6 +83,9 @@ its input** and **emits the AC state on its output**.
 | `{ "swing": "both" }` | Swing shorthand (`"vertical"` / `"horizontal"` / `"both"` / `"off"`) |
 | `{ "raw": { "airState.xxx": n } }` | Escape hatch: send any LG `airState.*` key directly |
 
+Rapid or concurrent messages to the same AC are **serialized** (applied one-at-a-time, in order),
+so a sequence of changes behaves like the LG app rather than overlapping into `0103` errors.
+
 An LG AC rejects mode/temperature/fan changes while it is off, so the node **automatically turns
 the AC on first** when you change one of those while it is off (power-on is sent before the other
 settings, with a short gap so the unit is ready). Turning the AC **off** ignores any other settings
