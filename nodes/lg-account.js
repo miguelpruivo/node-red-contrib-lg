@@ -10,6 +10,14 @@ const acLib = require('../lib/thinq/ac');
 const { storageDir, makeLogger, diffParsed } = require('../lib/red-helpers');
 
 module.exports = function (RED) {
+  // Log the running version once at load, so it's easy to confirm an update took
+  // effect (visible in the Node-RED startup log).
+  try {
+    RED.log.info('node-red-contrib-lg v' + require('../package.json').version + ' loaded');
+  } catch (e) {
+    /* ignore */
+  }
+
   function LgAccountNode(config) {
     RED.nodes.createNode(this, config);
     const node = this;
