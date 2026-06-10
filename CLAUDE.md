@@ -88,7 +88,13 @@ Gotchas (do not regress these):
   message. This makes the HomeKit/NRCHKB bridge work, where power/mode/temp arrive as
   separate messages.
 - LG errors must be surfaced with their `resultCode` (`describeLgError`), not the bare
-  axios "status code 400".
+  axios "status code 400". `resultCode 0103` is **transient** ("device busy / can't apply now",
+  common for fan speed after a power/mode change or in auto-managed modes) — `sendCommand` retries
+  these (`TRANSIENT_RESULT_CODES`); `0001` is a hard "bad value/state" and is not retried.
+- **Fan (windStrength) numeric values are model-specific.** The static map in `constants.js` is LG's
+  standard RAC enum (LOW=2/MID=4/HIGH=6 reliable; SLOW=0, POWER=7, NATURE=8) but some models differ
+  — authoritative source is the model JSON `Value['airState.windStrength'].value_mapping`. There is
+  no AUTO windStrength (AUTO is an opMode). Same model-specificity applies to vanes.
 - AC reports current room temperature **even while off** — important: polling delivers
   temperature regardless of power state. Don't "optimize" that away.
 - **Vane/louver control**: `airState.wDir.vStep` (vertical) and `airState.wDir.hStep`

@@ -101,6 +101,52 @@ test('interpretPowerState maps webOS responses', () => {
   assert.strictEqual(interpretPowerState(null), 'Off');
 });
 
+test('sendCommand retries a transient 0103 and then succeeds', async () => {
+  const { ThinQClient } = require('../lib/thinq/client');
+  const c = new ThinQClient({});
+  let calls = 0;
+  c._request = async () => {
+    calls += 1;
+    if (calls < 3) {
+      const e = new Error('busy');
+      e.resultCode = '0103';
+      throw e;
+    }
+    return { resultCode: '0000' };
+  };
+  const res = await c.sendCommand('dev', 'airState.windStrength', 2, { retryDelayMs: 1 });
+  assert.strictEqual(res.resultCode, '0000');
+  assert.strictEqual(calls, 3); // 1 try + 2 retries
+});
+
+test('sendCommand gives up after retries and rethrows 0103', async () => {
+  const { ThinQClient } = require('../lib/thinq/client');
+  const c = new ThinQClient({});
+  let calls = 0;
+  c._request = async () => {
+    calls += 1;
+    const e = new Error('busy');
+    e.resultCode = '0103';
+    throw e;
+  };
+  await assert.rejects(() => c.sendCommand('dev', 'k', 1, { retryDelayMs: 1 }), /busy/);
+  assert.strictEqual(calls, 3);
+});
+
+test('sendCommand does NOT retry a non-transient error', async () => {
+  const { ThinQClient } = require('../lib/thinq/client');
+  const c = new ThinQClient({});
+  let calls = 0;
+  c._request = async () => {
+    calls += 1;
+    const e = new Error('bad value');
+    e.resultCode = '0001';
+    throw e;
+  };
+  await assert.rejects(() => c.sendCommand('dev', 'k', 1, { retryDelayMs: 1 }), /bad value/);
+  assert.strictEqual(calls, 1);
+});
+
 test('mqtt parseMessage extracts deviceId + reported delta', () => {
   const buf = Buffer.from(JSON.stringify({
     deviceId: 'dev-1',
