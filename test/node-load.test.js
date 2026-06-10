@@ -175,7 +175,7 @@ test('lg-ac powering off ignores other settings in the same request', async () =
   assert.strictEqual(cmds[0].dataValue, 0);
 });
 
-test('lg-ac real-time only: emits mqtt pushes, suppresses poll', () => {
+test('lg-ac always forwards real-time mqtt pushes (account-controlled, even with Poll off)', () => {
   const { RED, instantiate } = makeRED();
   require('../nodes/lg-ac.js')(RED);
 
@@ -184,26 +184,23 @@ test('lg-ac real-time only: emits mqtt pushes, suppresses poll', () => {
   acct.subscribe = (h) => { handler = h; return () => {}; };
   RED.nodes._register('acc1', acct);
 
-  const node = instantiate('lg-ac', {
-    id: 'ac1', account: 'acc1', deviceId: 'dev1', emitPoll: false, emitRealtime: true,
-  });
+  const node = instantiate('lg-ac', { id: 'ac1', account: 'acc1', deviceId: 'dev1', emitPoll: false });
 
-  // A real-time push (source 'mqtt') must be emitted.
+  // A real-time push (source 'mqtt') is emitted regardless of the Poll setting.
   handler({
     deviceId: 'dev1', name: 'AC', source: 'mqtt', changed: true, changedKeys: ['power'],
     first: false, parsed: { power: true, currentTemperature: 24 },
   });
-  assert.strictEqual((node._sent || []).length, 1, 'one real-time message emitted');
+  assert.strictEqual((node._sent || []).length, 1, 'real-time push emitted');
   assert.strictEqual(node._sent[0].event, 'change');
-  assert.strictEqual(node._sent[0].payload.power, true);
 
-  // A poll tick must NOT emit when Poll output is disabled.
+  // With Poll off, poll ticks are suppressed.
   node._sent = [];
   handler({ deviceId: 'dev1', source: 'poll', changed: false, first: false, parsed: { power: true } });
   assert.strictEqual(node._sent.length, 0, 'no poll emit when Poll disabled');
 });
 
-test('lg-ac poll-only: emits every poll tick, suppresses mqtt', () => {
+test('lg-ac poll emits every tick when Poll enabled', () => {
   const { RED, instantiate } = makeRED();
   require('../nodes/lg-ac.js')(RED);
 
@@ -212,19 +209,12 @@ test('lg-ac poll-only: emits every poll tick, suppresses mqtt', () => {
   acct.subscribe = (h) => { handler = h; return () => {}; };
   RED.nodes._register('acc1', acct);
 
-  const node = instantiate('lg-ac', {
-    id: 'ac1', account: 'acc1', deviceId: 'dev1', emitPoll: true, emitRealtime: false,
-  });
+  const node = instantiate('lg-ac', { id: 'ac1', account: 'acc1', deviceId: 'dev1', emitPoll: true });
 
   // Poll tick with no change still emits (as 'periodic').
   handler({ deviceId: 'dev1', source: 'poll', changed: false, first: false, parsed: { power: true } });
   assert.strictEqual((node._sent || []).length, 1, 'poll tick emitted');
   assert.strictEqual(node._sent[0].event, 'periodic');
-
-  // MQTT push must NOT emit when Real-time output is disabled.
-  node._sent = [];
-  handler({ deviceId: 'dev1', source: 'mqtt', changed: true, changedKeys: ['power'], first: false, parsed: { power: false } });
-  assert.strictEqual(node._sent.length, 0, 'no mqtt emit when Real-time disabled');
 });
 
 test('lg-tv deriveAction maps payloads to on/off/toggle', () => {

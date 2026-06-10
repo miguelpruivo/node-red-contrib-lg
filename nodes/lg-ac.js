@@ -29,7 +29,6 @@ module.exports = function (RED) {
     node.account = RED.nodes.getNode(config.account);
     node.deviceId = config.deviceId;
     node.emitPoll = config.emitPoll !== false; // emit on every poll tick, default true
-    node.emitRealtime = config.emitRealtime !== false; // emit on MQTT push, default true
     node.includeRaw = !!config.includeRaw;
 
     if (!node.account) {
@@ -54,10 +53,9 @@ module.exports = function (RED) {
       const isChange = evt.changed || evt.first;
       let reason;
       if (evt.source === 'mqtt') {
-        // Real-time push from LG (inherently a change).
-        if (!node.emitRealtime) {
-          return;
-        }
+        // Real-time push from LG (inherently a change). Whether MQTT runs at all
+        // is controlled by the account's Real-time option, so there is no
+        // per-device toggle here — if a push arrives, emit it.
         reason = 'change';
       } else {
         // Poll tick: emit every time when poll output is enabled.

@@ -66,7 +66,6 @@
       account: { value: '', type: 'lg-account', required: true },
       deviceId: { value: '' },
       emitPoll: { value: true },
-      emitRealtime: { value: true },
       includeRaw: { value: false }
     },
     inputs: 1,
@@ -103,16 +102,10 @@
     <span id="lg-ac-devstatus" style="color:#999;"></span>
   </div>
   <hr/>
-  <hr/>
   <div class="form-row">
     <label for="node-input-emitPoll"><i class="fa fa-clock-o"></i> Poll</label>
     <input type="checkbox" id="node-input-emitPoll" style="display:inline-block; width:auto; vertical-align:top;">
     <span style="color:#999;">Emit on every poll tick (steady heartbeat; reports temperature even while off)</span>
-  </div>
-  <div class="form-row">
-    <label for="node-input-emitRealtime"><i class="fa fa-bolt"></i> Real-time</label>
-    <input type="checkbox" id="node-input-emitRealtime" style="display:inline-block; width:auto; vertical-align:top;">
-    <span style="color:#999;">Emit instant MQTT pushes (requires Real-time enabled on the account)</span>
   </div>
   <div class="form-row">
     <label for="node-input-includeRaw"><i class="fa fa-code"></i> Raw</label>
@@ -166,14 +159,15 @@
     <dd>The AC device id.</dd>
   </dl>
 
-  <h3>Output options</h3>
+  <h3>Output</h3>
   <ul>
     <li><b>Poll</b> — emit on every poll cycle (interval set on the account node), even if nothing
         changed. A steady heartbeat that always reports the current temperature.</li>
-    <li><b>Real-time</b> — emit instant MQTT pushes (changes made on the AC itself, e.g. its remote
-        or the LG app). Requires <b>Real-time</b> enabled on the account node.</li>
-    <li>Disable both to only emit responses to commands you send.</li>
-    <li>For change-only output, enable <b>Real-time</b> and disable <b>Poll</b> — or add a
-        <code>filter</code> (rbe) node after this one.</li>
+    <li><b>Real-time pushes</b> (changes made on the AC itself, e.g. its remote or the LG app) are
+        emitted automatically whenever <b>Real-time</b> is enabled on the account node — there is no
+        per-device toggle.</li>
+    <li>For change-only output, turn <b>Poll</b> off (with the account's Real-time on you then get
+        only instant change pushes) — or add a <code>filter</code> (rbe) node after this one.</li>
+    <li>Turn <b>Poll</b> off and the account's Real-time off to make this a control-only node.</li>
   </ul>
 </script>

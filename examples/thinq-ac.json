@@ -91,7 +91,6 @@
     "account": "lg-account-example",
     "deviceId": "",
     "emitPoll": true,
-    "emitRealtime": true,
     "includeRaw": false,
     "x": 410,
     "y": 190,

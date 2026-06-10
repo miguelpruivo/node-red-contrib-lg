@@ -119,18 +119,18 @@ fixed positions are model-dependent (e.g. vertical `1`–`6`, horizontal `1`–`
 `command` (after a control), or `query` (after a `"status"` request). Enable **Raw** to also get
 the raw `airState.*` snapshot in `msg.raw`.
 
-Two checkboxes control the output:
+Output behaviour:
 
-- **Poll** — emit on every poll cycle (a steady heartbeat; always reports the current temperature,
-  even while off). The **poll interval** lives on the account node (default 60 s, minimum 10 s) and
-  is shared by all `lg-ac` nodes.
-- **Real-time** — emit instant MQTT pushes, including changes made on the AC itself (its remote, the
-  LG app). Requires **Real-time** enabled on the account node (the MQTT master switch). Emitted as
-  `event: "change"`.
+- **Poll** (checkbox on the `lg-ac` node) — emit on every poll cycle (a steady heartbeat; always
+  reports the current temperature, even while off). The **poll interval** lives on the account node
+  (default 60 s, minimum 10 s) and is shared by all `lg-ac` nodes.
+- **Real-time pushes** — changes made on the AC itself (its remote, the LG app) are emitted instantly
+  (`event: "change"`) whenever **Real-time** is enabled on the **account** node. This is the single
+  MQTT switch; there is no per-device toggle — every `lg-ac` gets pushes for its device.
 
-Disable both to only get responses to commands you send. For **change-only** output, enable
-**Real-time** and disable **Poll** (or add a `filter`/rbe node after this one) — with Poll on you'll
-get a message every cycle whether or not anything changed.
+For **change-only** output, turn **Poll** off (with the account's Real-time on you then receive only
+instant change pushes) — or add a `filter`/rbe node after the `lg-ac` node. Turn Poll off and the
+account's Real-time off to make the node control-only (no status output).
 
 ---
 
