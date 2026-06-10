@@ -201,7 +201,7 @@ sending an "off" ignores any other settings in the same message.
 | `power` | `true` / `false` (also `"on"`, `"off"`, `"start"`, `"stop"`, `1`, `0`) |
 | `mode` | `"COOL"`, `"DRY"`, `"FAN"`, `"HEAT"`, `"AIR_CLEAN"`, `"AUTO"` (case-insensitive) or the numeric value |
 | `temperature` | number in °C (sent as-is; valid range is model-dependent, typically 16–30) |
-| `fan` | `"SLOW"`, `"SLOW_LOW"`, `"LOW"`, `"LOW_MID"`, `"MID"`, `"MID_HIGH"`, `"HIGH"`, `"POWER"`, `"NATURE"` or the numeric value |
+| `fan` | `"SLOW"`, `"SLOW_LOW"`, `"LOW"`, `"LOW_MID"`, `"MID"`, `"MID_HIGH"`, `"HIGH"`, `"POWER"`, `"AUTO"` or the numeric value |
 | `verticalVane` | `0` = stop, `1`–`6` = fixed position (1 = top), `100` = swing — or `"off"` / `"swing"` |
 | `horizontalVane` | `0` = stop, `1`–`5` = fixed position (1 = left), `100` = swing — or `"off"` / `"swing"` |
 | `swing` | `"vertical"`, `"horizontal"`, `"both"`, `"off"` (shorthand for setting both louvers to swing/stop) |
@@ -221,14 +221,14 @@ Example: `{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH", "ve
 | AUTO | 6 | | MID_HIGH | 5 |
 | | | | HIGH | 6 |
 | | | | POWER | 7 |
-| | | | NATURE | 8 |
+| | | | AUTO | 8 |
 
 > Which modes / fan speeds / vane positions a unit actually supports — **and the exact numbers** —
 > is model-dependent; the fan map above is LG's standard enum but some models differ. The
 > authoritative list is the device's model JSON (`modelJsonUri`,
 > `Value['airState.windStrength'].value_mapping`). `LOW` / `MID` / `HIGH` (2 / 4 / 6) are reliable.
-> There is **no `AUTO` fan speed** on typical single-fan units (`AUTO` is an *operation mode*, not a
-> fan setting); sending `fan: "AUTO"` is rejected rather than sent.
+> `AUTO` fan is `windStrength` value `8` (LG's model JSON labels this value "NATURE", but it is the
+> "auto" fan the app exposes).
 >
 > An unsupported value returns `resultCode 0001`. A **transient** `resultCode 0103` means the unit
 > couldn't apply the command at that moment (busy, or fan speed while in an auto-managed mode, or

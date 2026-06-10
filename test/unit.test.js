@@ -51,9 +51,19 @@ test('buildCommands rejects invalid mode', () => {
   assert.throws(() => ac.buildCommands({ mode: 'NONSENSE_MODE' }), /Invalid mode/);
 });
 
-test('buildCommands rejects fan "AUTO" with a helpful message (no auto fan speed)', () => {
-  assert.throws(() => ac.buildCommands({ fan: 'AUTO' }), /no "AUTO" fan speed/);
-  assert.throws(() => ac.buildCommands({ fan: 'auto' }), /Unsupported fan value/);
+test('buildCommands maps fan AUTO to windStrength 8', () => {
+  assert.deepStrictEqual(ac.buildCommands({ fan: 'AUTO' }), [
+    { dataKey: 'airState.windStrength', dataValue: 8, label: 'fan=8' },
+  ]);
+  assert.strictEqual(ac.buildCommands({ fan: 'auto' })[0].dataValue, 8);
+});
+
+test('parseSnapshot reports windStrength 8 as AUTO', () => {
+  assert.strictEqual(ac.parseSnapshot({ 'airState.windStrength': 8 }).fanSpeed, 'AUTO');
+});
+
+test('buildCommands rejects a truly unknown fan value', () => {
+  assert.throws(() => ac.buildCommands({ fan: 'TURBOZ' }), /Unsupported fan value/);
 });
 
 test('buildCommands sets vane positions', () => {
