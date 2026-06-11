@@ -5,7 +5,7 @@ const assert = require('node:assert');
 
 const ac = require('../lib/thinq/ac');
 const wol = require('../lib/webos/wol');
-const { interpretPowerState, WebosTv } = require('../lib/webos/tv');
+const { interpretPowerState, isPoweredOn, WebosTv } = require('../lib/webos/tv');
 const { parseMessage, createCsr, generatePrivateKey } = require('../lib/thinq/mqtt');
 
 test('parseSnapshot reads temperature even when AC is off', () => {
@@ -113,7 +113,22 @@ test('interpretPowerState maps webOS responses', () => {
   assert.strictEqual(interpretPowerState({ state: 'Active' }), 'On');
   assert.strictEqual(interpretPowerState({ state: 'Suspend' }), 'Off');
   assert.strictEqual(interpretPowerState({ state: 'Active Standby' }), 'Pixel Refresher');
+  assert.strictEqual(interpretPowerState({ state: 'Screen Saver' }), 'Screen Saver');
+  assert.strictEqual(interpretPowerState({ state: 'Screen Off' }), 'Screen Off');
   assert.strictEqual(interpretPowerState(null), 'Off');
+});
+
+test('isPoweredOn treats screensaver/screen-off as ON, only Suspend/Pixel Refresher as OFF', () => {
+  // Panel states while the TV is still powered -> ON (no spurious off event).
+  assert.strictEqual(isPoweredOn('On'), true);
+  assert.strictEqual(isPoweredOn('Screen Saver'), true);
+  assert.strictEqual(isPoweredOn('Screen Off'), true);
+  assert.strictEqual(isPoweredOn('Screen On'), true);
+  // Genuine off / standby maintenance -> OFF.
+  assert.strictEqual(isPoweredOn('Off'), false);
+  assert.strictEqual(isPoweredOn('Pixel Refresher'), false);
+  // Unrecognised state stays ON; a real power-off is caught by the connection close.
+  assert.strictEqual(isPoweredOn('Unknown'), true);
 });
 
 test('withDeviceLock serializes operations for the same device', async () => {

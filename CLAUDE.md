@@ -140,6 +140,15 @@ remote, the LG app) emit instantly instead of waiting for a poll.
 - Power state via `ssap://com.webos.service.tvpower/power/getPowerState` subscription, with
   the websocket connection state as a fallback. Off detection ≈ instant; on detection ≈
   within the `reconnect` interval (default 5 s) because we retry-connect while off.
+- **Screensaver is NOT off (gotcha).** `interpretPowerState` returns a descriptive *label*
+  (Active→`On`, `Screen Saver`, `Screen Off`, `Screen On`, Suspend→`Off`, Active Standby→
+  `Pixel Refresher`, …) but `isPoweredOn(label)` decides the boolean: only `Off` and
+  `Pixel Refresher` count as off — **everything else (incl. `Screen Saver`/`Screen Off`) is
+  reported as ON**. The screensaver and a blanked panel are panel states while the unit is
+  still powered; mapping only `Active` to on (the old bug) flipped to `off` when the
+  screensaver started and back to `on` on the next remote press. A genuine power-off is the
+  `Off`/`Pixel Refresher` state *and* a dropped websocket (`close` forces off). There IS a
+  regression test (`isPoweredOn …`).
 - First connection needs a one-time **pairing prompt** accepted on the TV; the key is saved
   to `webos-<id>.key`.
 
