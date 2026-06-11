@@ -138,6 +138,10 @@
       </ul>
       Changing mode/temperature/fan while the AC is off turns it on first;
       turning it off ignores any other settings in the same message.
+      Powering the unit on always sets the fan to <code>AUTO</code> (any
+      <code>fan</code> in the same message is overridden). Commands to the same
+      AC are queued and applied one at a time, with a short wait (3&nbsp;s)
+      before each, so a burst of separate messages doesn't overlap.
     </dd>
     <dt class="optional">deviceId<span class="property-type">string</span></dt>
     <dd>Overrides the configured AC for this message.</dd>

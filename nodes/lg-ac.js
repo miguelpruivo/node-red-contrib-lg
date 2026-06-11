@@ -4,7 +4,28 @@ const acLib = require('../lib/thinq/ac');
 const C = require('../lib/thinq/constants');
 
 const POWER_KEY = C.KEYS.POWER;
-const COMMAND_DELAY_MS = 600;
+const WIND_KEY = C.KEYS.WIND_STRENGTH;
+const FAN_AUTO = C.WindStrength.AUTO; // windStrength 8 = the app's "auto" fan
+const COMMAND_DELAY_MS = 600;         // spacing between the sub-commands of one sequence
+const QUEUE_DELAY_MS = 3000;          // debounce before each queued control op (see input handler)
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// When a control sequence powers the AC on, always run the fan at AUTO: drop
+// whatever fan the request asked for and append fan=AUTO *after* the power-on
+// (LG rejects settings sent while the unit is off, so the fan must come last).
+function forceAutoFanOnPowerOn(commands) {
+  const poweringOn = commands.some((c) => c.dataKey === POWER_KEY && c.dataValue === 1);
+  if (!poweringOn) {
+    return commands;
+  }
+  return [
+    ...commands.filter((c) => c.dataKey !== WIND_KEY),
+    { dataKey: WIND_KEY, dataValue: FAN_AUTO, label: `fan=${FAN_AUTO}` },
+  ];
+}
 
 // Is the AC currently on? Trust a recent poller snapshot that says "on";
 // otherwise confirm with a fresh read so we don't try to change mode/temp/fan
@@ -30,6 +51,10 @@ module.exports = function (RED) {
     node.deviceId = config.deviceId;
     node.emitPoll = config.emitPoll !== false; // emit on every poll tick, default true
     node.includeRaw = !!config.includeRaw;
+    // Debounce before each queued control op. Default 3s; overridable (mainly so
+    // tests can set 0). Set per-device serialization spaces concurrent messages.
+    const q = Number(config.queueDelayMs);
+    node.queueDelayMs = Number.isFinite(q) && q >= 0 ? q : QUEUE_DELAY_MS;
 
     if (!node.account) {
       node.status({ fill: 'red', shape: 'ring', text: 'no account' });
@@ -117,6 +142,15 @@ module.exports = function (RED) {
         // Overlapping control commands can be rejected (0103) or even power the
         // unit off; serializing makes a sequence behave like the LG app.
         await client.withDeviceLock(deviceId, async () => {
+          // Debounce: wait before each queued control op so a burst of messages
+          // (HomeKit/NRCHKB sends power/mode/temp/fan as separate messages)
+          // applies one-at-a-time with breathing room instead of overlapping.
+          // The per-device lock makes concurrent messages queue; this spaces them.
+          if (node.queueDelayMs > 0) {
+            node.status({ fill: 'blue', shape: 'ring', text: 'queued...' });
+            await delay(node.queueDelayMs);
+          }
+
           const turningOff = settingCmds.some((c) => c.dataKey === POWER_KEY && c.dataValue === 0);
           const turningOn = settingCmds.some((c) => c.dataKey === POWER_KEY && c.dataValue === 1);
           const nonPowerCmds = settingCmds.filter((c) => c.dataKey !== POWER_KEY);
@@ -134,6 +168,9 @@ module.exports = function (RED) {
           } else {
             commands = settingCmds; // power on (optionally with settings), or power-only
           }
+
+          // Whenever this op powers the unit on, always run the fan at AUTO.
+          commands = forceAutoFanOnPowerOn(commands);
 
           node.status({ fill: 'blue', shape: 'dot', text: 'sending...' });
           await client.sendCommands(deviceId, commands, { delayMs: COMMAND_DELAY_MS });

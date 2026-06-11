@@ -152,7 +152,7 @@ function runAcControl(payload, getDeviceSnapshot) {
       sendCommands: async (id, cmds) => { sent.push(cmds); return []; },
     },
   }));
-  const node = instantiate('lg-ac', { id: 'acx', account: 'accx', deviceId: 'dev1' });
+  const node = instantiate('lg-ac', { id: 'acx', account: 'accx', deviceId: 'dev1', queueDelayMs: 0 });
   return new Promise((resolve, reject) => {
     node.emit('input', { payload }, () => {}, (err) => {
       if (err) { reject(err); } else { resolve(sent[0] || []); }
@@ -178,6 +178,39 @@ test('lg-ac powering off ignores other settings in the same request', async () =
   assert.strictEqual(cmds.length, 1);
   assert.strictEqual(cmds[0].dataKey, 'airState.operation');
   assert.strictEqual(cmds[0].dataValue, 0);
+});
+
+test('lg-ac forces fan to AUTO when powering on', async () => {
+  const cmds = await runAcControl({ power: true }, { 'airState.operation': 0 });
+  assert.strictEqual(cmds[0].dataKey, 'airState.operation');
+  assert.strictEqual(cmds[0].dataValue, 1);
+  // fan=AUTO (windStrength 8) appended after the power-on.
+  const fan = cmds[cmds.length - 1];
+  assert.strictEqual(fan.dataKey, 'airState.windStrength');
+  assert.strictEqual(fan.dataValue, 8);
+});
+
+test('lg-ac power-on overrides an explicit fan with AUTO', async () => {
+  const cmds = await runAcControl({ power: true, fan: 'HIGH' }, { 'airState.operation': 0 });
+  const fans = cmds.filter((c) => c.dataKey === 'airState.windStrength');
+  assert.strictEqual(fans.length, 1, 'only one fan command');
+  assert.strictEqual(fans[0].dataValue, 8, 'forced to AUTO, not HIGH');
+});
+
+test('lg-ac forces fan AUTO when implicitly powering on for a setting change', async () => {
+  const cmds = await runAcControl({ temperature: 22 }, { 'airState.operation': 0 });
+  assert.ok(cmds.some((c) => c.dataKey === 'airState.operation' && c.dataValue === 1), 'powers on');
+  assert.ok(cmds.some((c) => c.dataKey === 'airState.windStrength' && c.dataValue === 8), 'fan forced to AUTO');
+});
+
+test('lg-ac does NOT touch the fan when already on (no power-on)', async () => {
+  const cmds = await runAcControl({ temperature: 22 }, { 'airState.operation': 1 });
+  assert.ok(!cmds.some((c) => c.dataKey === 'airState.windStrength'), 'no forced fan command');
+});
+
+test('lg-ac powering off does not add a fan command', async () => {
+  const cmds = await runAcControl({ power: false }, { 'airState.operation': 1 });
+  assert.ok(!cmds.some((c) => c.dataKey === 'airState.windStrength'), 'no fan on power-off');
 });
 
 test('lg-ac always forwards real-time mqtt pushes (account-controlled, even with Poll off)', () => {

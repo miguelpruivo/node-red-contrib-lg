@@ -87,13 +87,23 @@ Gotchas (do not regress these):
   first (with `COMMAND_DELAY_MS` spacing); turning off ignores other settings in the same
   message. This makes the HomeKit/NRCHKB bridge work, where power/mode/temp arrive as
   separate messages.
-- **Per-device serialization:** `lg-ac` wraps each device operation in
+- **Fan forced to AUTO on power-on:** whenever a control op actually emits a power-on
+  (explicit `{power:true}` *or* the implicit power-on before a setting change while off),
+  `forceAutoFanOnPowerOn` drops any requested fan and appends `fan=AUTO` (windStrength 8)
+  **after** the power-on. This is intentional product behaviour (the user wants every power-on
+  to run the fan at AUTO) — an explicit `fan` in the same message is overridden, not honoured.
+  Power-off never adds a fan command. There are regression tests in `node-load.test.js`.
+- **Per-device serialization + 3s queue debounce:** `lg-ac` wraps each device operation in
   `client.withDeviceLock(deviceId, fn)`. Node-RED runs the node's async `input` handler
   concurrently, so without this, a rapid sequence (LOW→…→HIGH→AUTO) sends overlapping
   `control-sync` calls to the same AC — which the unit rejects (`0103`) or reacts to by powering
-  off. The lock makes a sequence behave like the LG app (one change at a time). Different devices
-  run in parallel. The verified example: app sets fan AUTO = `windStrength 8` and stays on; the
-  plugin sending the same value while commands overlapped powered the unit off.
+  off. The lock makes a sequence behave like the LG app (one change at a time). On top of the
+  lock, each queued control op waits `node.queueDelayMs` (**default 3000 ms**, `QUEUE_DELAY_MS`)
+  before sending, so a burst of separate messages is spaced out, not just serialized. The delay
+  is overridable via `config.queueDelayMs` — tests pass `0` to stay fast (it is not surfaced in
+  the editor HTML on purpose; keep it simple). The query/`"status"` path is **not** delayed.
+  Different devices run in parallel. The verified example: app sets fan AUTO = `windStrength 8`
+  and stays on; the plugin sending the same value while commands overlapped powered the unit off.
 - LG errors must be surfaced with their `resultCode` (`describeLgError`), not the bare
   axios "status code 400". `resultCode 0103` is **transient** ("device busy / can't apply now",
   common for fan speed after a power/mode change or in auto-managed modes) — `sendCommand` retries
