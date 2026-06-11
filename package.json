@@ -26,6 +26,11 @@
   "engines": {
     "node": ">=18"
   },
+  "files": [
+    "nodes/",
+    "lib/",
+    "examples/"
+  ],
   "scripts": {
     "test": "node --test test/*.test.js",
     "smoke:thinq": "node test/thinq-smoke.js",

@@ -1,5 +1,6 @@
 test/
 .github/
+.claude/
 CLAUDE.md
 .gitignore
 *.log
