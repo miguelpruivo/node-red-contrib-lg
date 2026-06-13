@@ -7,10 +7,20 @@ const POWER_KEY = C.KEYS.POWER;
 const WIND_KEY = C.KEYS.WIND_STRENGTH;
 const FAN_AUTO = C.WindStrength.AUTO; // windStrength 8 = the app's "auto" fan
 const COMMAND_DELAY_MS = 600;         // spacing between the sub-commands of one sequence
-const QUEUE_DELAY_MS = 3000;          // debounce before each queued control op (see input handler)
+const COALESCE_MS = 600;              // collect a burst of messages this long, then send once
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Merge a parsed request into an accumulating batch: later values win per field
+// (so power on→off in the same burst ends up off). `raw` is merged key-by-key so
+// successive raw escape-hatch messages combine instead of replacing each other.
+function mergeRequest(target, src) {
+  for (const [key, value] of Object.entries(src)) {
+    if (key === 'raw' && value && typeof value === 'object') {
+      target.raw = Object.assign({}, target.raw, value);
+    } else {
+      target[key] = value;
+    }
+  }
+  return target;
 }
 
 // When a control sequence powers the AC on, always run the fan at AUTO: drop
@@ -51,10 +61,11 @@ module.exports = function (RED) {
     node.deviceId = config.deviceId;
     node.emitPoll = config.emitPoll !== false; // emit on every poll tick, default true
     node.includeRaw = !!config.includeRaw;
-    // Debounce before each queued control op. Default 3s; overridable (mainly so
-    // tests can set 0). Set per-device serialization spaces concurrent messages.
-    const q = Number(config.queueDelayMs);
-    node.queueDelayMs = Number.isFinite(q) && q >= 0 ? q : QUEUE_DELAY_MS;
+    // Coalescing window: collect a burst of messages for this long, merge them,
+    // and send ONE ordered sequence. Default 600ms; overridable (tests set 0).
+    const c = Number(config.coalesceMs);
+    node.coalesceMs = Number.isFinite(c) && c >= 0 ? c : COALESCE_MS;
+    node._pending = {}; // deviceId -> { request, dones, baseMsg, send, timer }
 
     if (!node.account) {
       node.status({ fill: 'red', shape: 'ring', text: 'no account' });
@@ -105,6 +116,13 @@ module.exports = function (RED) {
     });
 
     // -------- control input --------
+    // Messages are coalesced per device: a burst arriving within node.coalesceMs
+    // is merged into a single request and sent as ONE ordered sequence. This makes
+    // the first message react quickly (no per-message debounce), collapses an
+    // NRCHKB/HomeKit burst into a single set of cloud calls, and — crucially —
+    // lets power be decided after the whole burst is seen, so a vane change that
+    // arrives next to a power-off can't power the unit back on. The per-device lock
+    // still serializes whole bursts. Queries are not coalesced (answered at once).
     node.on('input', async (msg, send, done) => {
       send = send || node.send.bind(node);
       done = done || ((err) => { if (err) { node.error(err, msg); } });
@@ -115,13 +133,12 @@ module.exports = function (RED) {
           throw new Error('No deviceId configured or provided in msg.deviceId');
         }
 
-        const client = node.account.getClient();
-        await node.account.ensureReady();
-
         const request = acLib.normalizeRequest(msg.payload, msg.topic);
 
-        // Query only
+        // Query only — answer immediately (still serialized via the device lock).
         if (request.query) {
+          const client = node.account.getClient();
+          await node.account.ensureReady();
           await client.withDeviceLock(deviceId, async () => {
             const device = await client.getDevice(deviceId);
             const parsed = acLib.parseSnapshot(device && device.snapshot);
@@ -131,33 +148,63 @@ module.exports = function (RED) {
           return done();
         }
 
-        // Build the control commands (pure — fail fast on bad input).
-        const settingCmds = acLib.buildCommands(request);
-        if (!settingCmds.length) {
+        // Validate this message up front so bad input fails fast (the real build
+        // happens at flush, from the merged request).
+        if (!acLib.buildCommands(request).length) {
           throw new Error('No AC command found in payload');
         }
 
-        // Run the whole control sequence under a per-device lock, so rapid or
-        // concurrent messages to the same AC apply strictly one-at-a-time.
-        // Overlapping control commands can be rejected (0103) or even power the
-        // unit off; serializing makes a sequence behave like the LG app.
-        await client.withDeviceLock(deviceId, async () => {
-          // Debounce: wait before each queued control op so a burst of messages
-          // (HomeKit/NRCHKB sends power/mode/temp/fan as separate messages)
-          // applies one-at-a-time with breathing room instead of overlapping.
-          // The per-device lock makes concurrent messages queue; this spaces them.
-          if (node.queueDelayMs > 0) {
-            node.status({ fill: 'blue', shape: 'ring', text: 'queued...' });
-            await delay(node.queueDelayMs);
-          }
+        enqueue(deviceId, request, msg, send, done);
+      } catch (err) {
+        node.status({ fill: 'red', shape: 'ring', text: String(err.message).slice(0, 28) });
+        return done(err);
+      }
+    });
 
+    // Add a message to the per-device batch, arming the flush timer on the first.
+    function enqueue(deviceId, request, msg, send, done) {
+      let p = node._pending[deviceId];
+      if (!p) {
+        p = node._pending[deviceId] = { request: {}, dones: [], baseMsg: msg, send: send, timer: null };
+        p.timer = setTimeout(() => { flush(deviceId); }, node.coalesceMs);
+      }
+      mergeRequest(p.request, request);
+      p.dones.push(done);
+      p.baseMsg = msg;
+      p.send = send;
+      node.status({ fill: 'blue', shape: 'ring', text: 'queued...' });
+    }
+
+    // Send the merged batch for a device as ONE ordered control sequence, under
+    // the per-device lock (so a new burst queues behind one still in flight).
+    async function flush(deviceId) {
+      const p = node._pending[deviceId];
+      if (!p) {
+        return;
+      }
+      delete node._pending[deviceId];
+      clearTimeout(p.timer);
+      const { request, dones, baseMsg, send } = p;
+
+      try {
+        const client = node.account.getClient();
+        await node.account.ensureReady();
+
+        const settingCmds = acLib.buildCommands(request);
+        if (!settingCmds.length) {
+          dones.forEach((d) => d());
+          return;
+        }
+
+        await client.withDeviceLock(deviceId, async () => {
           const turningOff = settingCmds.some((c) => c.dataKey === POWER_KEY && c.dataValue === 0);
           const turningOn = settingCmds.some((c) => c.dataKey === POWER_KEY && c.dataValue === 1);
           const nonPowerCmds = settingCmds.filter((c) => c.dataKey !== POWER_KEY);
 
           let commands;
           if (turningOff) {
-            // Powering off: ignore any other settings in the same request.
+            // Powering off wins over everything else in the burst: send power=0
+            // only, so a coincident setting change can't power the unit back on.
             commands = [{ dataKey: POWER_KEY, dataValue: 0, label: 'power=0' }];
           } else if (nonPowerCmds.length && !turningOn) {
             // Changing mode/temperature/fan requires the AC to be ON first.
@@ -175,27 +222,32 @@ module.exports = function (RED) {
           node.status({ fill: 'blue', shape: 'dot', text: 'sending...' });
           await client.sendCommands(deviceId, commands, { delayMs: COMMAND_DELAY_MS });
 
-          // Read back the resulting state.
+          // Read back the resulting state and emit one consolidated result.
           const device = await client.getDevice(deviceId);
           const parsed = acLib.parseSnapshot(device && device.snapshot);
-          msg.commands = commands.map((c) => c.label);
-          emitResult(node, send, msg, deviceId, parsed, device && device.snapshot, 'command');
+          baseMsg.commands = commands.map((c) => c.label);
+          emitResult(node, send, baseMsg, deviceId, parsed, device && device.snapshot, 'command');
           setAcStatus(parsed);
         });
-        return done();
+        dones.forEach((d) => d());
       } catch (err) {
         node.status({ fill: 'red', shape: 'ring', text: String(err.message).slice(0, 28) });
         if (err.body) {
           node.debug('ThinQ error body: ' + JSON.stringify(err.body));
         }
-        return done(err);
+        dones.forEach((d) => d(err));
       }
-    });
+    }
 
     node.on('close', () => {
       if (unsubscribe) {
         unsubscribe();
       }
+      for (const id of Object.keys(node._pending)) {
+        clearTimeout(node._pending[id].timer);
+        node._pending[id].dones.forEach((d) => d());
+      }
+      node._pending = {};
     });
   }
 

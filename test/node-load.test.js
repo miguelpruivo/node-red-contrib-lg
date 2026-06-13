@@ -152,7 +152,7 @@ function runAcControl(payload, getDeviceSnapshot) {
       sendCommands: async (id, cmds) => { sent.push(cmds); return []; },
     },
   }));
-  const node = instantiate('lg-ac', { id: 'acx', account: 'accx', deviceId: 'dev1', queueDelayMs: 0 });
+  const node = instantiate('lg-ac', { id: 'acx', account: 'accx', deviceId: 'dev1', coalesceMs: 0 });
   return new Promise((resolve, reject) => {
     node.emit('input', { payload }, () => {}, (err) => {
       if (err) { reject(err); } else { resolve(sent[0] || []); }
@@ -211,6 +211,63 @@ test('lg-ac does NOT touch the fan when already on (no power-on)', async () => {
 test('lg-ac powering off does not add a fan command', async () => {
   const cmds = await runAcControl({ power: false }, { 'airState.operation': 1 });
   assert.ok(!cmds.some((c) => c.dataKey === 'airState.windStrength'), 'no fan on power-off');
+});
+
+// Send several messages to one node in the same tick; they coalesce into a single
+// flush. Resolves once every message's done() has fired.
+function runAcBurst(payloads, getDeviceSnapshot) {
+  const { RED, instantiate } = makeRED();
+  require('../nodes/lg-ac.js')(RED);
+  const sent = [];
+  RED.nodes._register('accx', stubAccount({
+    client: {
+      getDevice: async () => ({ snapshot: getDeviceSnapshot }),
+      sendCommands: async (id, cmds) => { sent.push(cmds); return []; },
+    },
+  }));
+  const node = instantiate('lg-ac', { id: 'acx', account: 'accx', deviceId: 'dev1', coalesceMs: 0 });
+  return new Promise((resolve, reject) => {
+    let remaining = payloads.length;
+    for (const payload of payloads) {
+      node.emit('input', { payload }, () => {}, (err) => {
+        if (err) { return reject(err); }
+        if (--remaining === 0) { resolve({ sent, commands: sent[0] || [] }); }
+      });
+    }
+  });
+}
+
+test('lg-ac coalesces a burst into a single control sequence', async () => {
+  const { sent, commands } = await runAcBurst(
+    [{ temperature: 22 }, { fan: 'HIGH' }], { 'airState.operation': 1 });
+  assert.strictEqual(sent.length, 1, 'one sequence for the whole burst');
+  assert.ok(commands.some((c) => c.dataKey === 'airState.tempState.target' && c.dataValue === 22));
+  assert.ok(commands.some((c) => c.dataKey === 'airState.windStrength' && c.dataValue === 6));
+});
+
+test('lg-ac power-off wins over a coincident vane change (no re-power)', async () => {
+  const { sent, commands } = await runAcBurst(
+    [{ verticalVane: 2 }, { power: false }], { 'airState.operation': 1 });
+  assert.strictEqual(sent.length, 1, 'one sequence');
+  assert.strictEqual(commands.length, 1, 'power-off only — no vane, no power-on');
+  assert.strictEqual(commands[0].dataKey, 'airState.operation');
+  assert.strictEqual(commands[0].dataValue, 0);
+});
+
+test('lg-ac last power value wins within a burst (on then off => off)', async () => {
+  const { commands } = await runAcBurst(
+    [{ power: true }, { power: false }], { 'airState.operation': 1 });
+  assert.strictEqual(commands.length, 1);
+  assert.strictEqual(commands[0].dataValue, 0, 'ends up off');
+});
+
+test('lg-ac coalesced power-on + setting still forces fan AUTO', async () => {
+  const { commands } = await runAcBurst(
+    [{ power: true }, { temperature: 22 }], { 'airState.operation': 0 });
+  assert.strictEqual(commands[0].dataKey, 'airState.operation');
+  assert.strictEqual(commands[0].dataValue, 1, 'powers on first');
+  assert.ok(commands.some((c) => c.dataKey === 'airState.tempState.target' && c.dataValue === 22));
+  assert.ok(commands.some((c) => c.dataKey === 'airState.windStrength' && c.dataValue === 8), 'fan AUTO');
 });
 
 test('lg-ac always forwards real-time mqtt pushes (account-controlled, even with Poll off)', () => {

@@ -93,17 +93,26 @@ Gotchas (do not regress these):
   **after** the power-on. This is intentional product behaviour (the user wants every power-on
   to run the fan at AUTO) — an explicit `fan` in the same message is overridden, not honoured.
   Power-off never adds a fan command. There are regression tests in `node-load.test.js`.
-- **Per-device serialization + 3s queue debounce:** `lg-ac` wraps each device operation in
+- **Per-device serialization + burst coalescing:** `lg-ac` wraps each device operation in
   `client.withDeviceLock(deviceId, fn)`. Node-RED runs the node's async `input` handler
   concurrently, so without this, a rapid sequence (LOW→…→HIGH→AUTO) sends overlapping
   `control-sync` calls to the same AC — which the unit rejects (`0103`) or reacts to by powering
-  off. The lock makes a sequence behave like the LG app (one change at a time). On top of the
-  lock, each queued control op waits `node.queueDelayMs` (**default 3000 ms**, `QUEUE_DELAY_MS`)
-  before sending, so a burst of separate messages is spaced out, not just serialized. The delay
-  is overridable via `config.queueDelayMs` — tests pass `0` to stay fast (it is not surfaced in
-  the editor HTML on purpose; keep it simple). The query/`"status"` path is **not** delayed.
-  Different devices run in parallel. The verified example: app sets fan AUTO = `windStrength 8`
-  and stays on; the plugin sending the same value while commands overlapped powered the unit off.
+  off. The lock makes a sequence behave like the LG app (one change at a time).
+  On top of the lock, control messages are **coalesced**: a burst arriving within
+  `node.coalesceMs` (**default 600 ms**, `COALESCE_MS`) is merged into **one** request
+  (`mergeRequest`, last value wins per field — so `power:true` then `power:false` ends up off)
+  and sent as a **single** ordered sequence (`enqueue`/`flush`). This replaced the old
+  per-message 3 s debounce: the first message now reacts in ~`coalesceMs` instead of waiting a
+  full debounce, an NRCHKB/HomeKit burst becomes one set of cloud calls instead of N staggered
+  ones, and — crucially — **power is decided after the whole burst is seen**, so a vane change
+  arriving next to a power-off can no longer re-power the unit (power-off wins; settings are
+  dropped — see `forceAutoFanOnPowerOn` and the power-gate). One consolidated `command` output
+  is emitted per burst. `coalesceMs` is overridable via `config.coalesceMs` — tests pass `0` to
+  stay fast (it is not surfaced in the editor HTML on purpose; keep it simple). The
+  query/`"status"` path is **not** coalesced or delayed. Different devices run in parallel. The
+  verified example: app sets fan AUTO = `windStrength 8` and stays on; the plugin sending the
+  same value while commands overlapped powered the unit off. Regression tests in
+  `node-load.test.js` cover coalescing, power-last, and last-write-wins.
 - LG errors must be surfaced with their `resultCode` (`describeLgError`), not the bare
   axios "status code 400". `resultCode 0103` is **transient** ("device busy / can't apply now",
   common for fan speed after a power/mode change or in auto-managed modes) — `sendCommand` retries
