@@ -83,36 +83,51 @@ Gotchas (do not regress these):
 - The OAuth signature timestamp must be **RFC 2822 with `+0000`**, not `GMT`. We build
   it from `Date.toUTCString().replace(' GMT', ' +0000')` (`rfc2822`).
 - An AC **rejects mode/temperature/fan changes while it is off** (HTTP 400, resultCode
-  `0001`). `lg-ac` therefore **power-gates**: changing a setting while off sends power-on
-  first (with `COMMAND_DELAY_MS` spacing); turning off ignores other settings in the same
-  message. This makes the HomeKit/NRCHKB bridge work, where power/mode/temp arrive as
-  separate messages.
+  `0001`). `lg-ac` therefore treats settings as **on-only**: a setting takes effect only when
+  the unit *ends up on*. Decision in `flush()`: power-off → send `power=0` only (drop settings);
+  explicit `power:true` → power-on (if needed) + settings; no power command & unit on → settings;
+  no power command & unit **off → discard the settings** (do **not** auto-power-on). To turn on
+  *with* settings, send them together with `power:true` (e.g. `{power:true, mode:'cool',
+  temperature:22}`). **History:** an earlier version *power-gated* (sent power-on first for a bare
+  setting while off). That was removed at the user's request because it let a setting arriving just
+  after a power-off switch the unit back on — making "settings only apply while on" the invariant
+  is what makes a power-off final regardless of message timing (so the short coalesce window below
+  is a latency choice, not a safety one).
+- **No-op skipping:** `flush()` drops any setting already at the device's current value (`isNoOp`
+  vs the cached/`currentSnapshot` snapshot, `DEDUPE_KEYS` = mode/temp/fan/both vanes). Every
+  `control-sync` makes the unit **beep**, so this cuts the beeping and the cloud calls down to
+  genuine changes; a redundant `power:true`/`power:false` likewise becomes a no-op. Conservative:
+  only modelled scalar keys, a missing snapshot key is always sent, `raw` is never deduped, and a
+  cached "off" is re-confirmed with a fresh read before deciding. The shared cache is refreshed
+  from the post-command read-back so a rapid follow-up burst dedupes against truth.
 - **Fan forced to AUTO on power-on:** whenever a control op actually emits a power-on
-  (explicit `{power:true}` *or* the implicit power-on before a setting change while off),
-  `forceAutoFanOnPowerOn` drops any requested fan and appends `fan=AUTO` (windStrength 8)
-  **after** the power-on. This is intentional product behaviour (the user wants every power-on
-  to run the fan at AUTO) — an explicit `fan` in the same message is overridden, not honoured.
-  Power-off never adds a fan command. There are regression tests in `node-load.test.js`.
-- **Per-device serialization + burst coalescing:** `lg-ac` wraps each device operation in
+  (`{power:true}` while off), `forceAutoFanOnPowerOn` drops any requested fan and appends
+  `fan=AUTO` (windStrength 8) **after** the power-on. This is intentional product behaviour (the
+  user wants every power-on to run the fan at AUTO) — an explicit `fan` in the same message is
+  overridden, not honoured. A redundant `power:true` while already on is a no-op (no power-on, so
+  no forced fan). Power-off never adds a fan command. Regression tests in `node-load.test.js`.
+- **Per-device serialization + leading-edge coalescing:** `lg-ac` wraps each device operation in
   `client.withDeviceLock(deviceId, fn)`. Node-RED runs the node's async `input` handler
   concurrently, so without this, a rapid sequence (LOW→…→HIGH→AUTO) sends overlapping
   `control-sync` calls to the same AC — which the unit rejects (`0103`) or reacts to by powering
   off. The lock makes a sequence behave like the LG app (one change at a time).
-  On top of the lock, control messages are **coalesced**: a burst arriving within
-  `node.coalesceMs` (**default 600 ms**, `COALESCE_MS`) is merged into **one** request
-  (`mergeRequest`, last value wins per field — so `power:true` then `power:false` ends up off)
-  and sent as a **single** ordered sequence (`enqueue`/`flush`). This replaced the old
-  per-message 3 s debounce: the first message now reacts in ~`coalesceMs` instead of waiting a
-  full debounce, an NRCHKB/HomeKit burst becomes one set of cloud calls instead of N staggered
-  ones, and — crucially — **power is decided after the whole burst is seen**, so a vane change
-  arriving next to a power-off can no longer re-power the unit (power-off wins; settings are
-  dropped — see `forceAutoFanOnPowerOn` and the power-gate). One consolidated `command` output
-  is emitted per burst. `coalesceMs` is overridable via `config.coalesceMs` — tests pass `0` to
-  stay fast (it is not surfaced in the editor HTML on purpose; keep it simple). The
-  query/`"status"` path is **not** coalesced or delayed. Different devices run in parallel. The
-  verified example: app sets fan AUTO = `windStrength 8` and stays on; the plugin sending the
-  same value while commands overlapped powered the unit off. Regression tests in
-  `node-load.test.js` cover coalescing, power-last, and last-write-wins.
+  On top of the lock, control messages are coalesced **leading-edge** (`enqueue`/`flush`,
+  `node._busy` gate): the first message of an idle device flushes on the **next tick** (`setTimeout
+  0` — a lone command reacts in ~0 ms, no debounce wait), with messages that land in the **same
+  tick** merged into it (`mergeRequest`, last value wins per field — so a `{power:false}` next to a
+  setting still drops the setting). Anything that arrives while that flush is in flight, or within
+  the **trailing** `node.coalesceMs` window after it (**default 150 ms**, `COALESCE_MS`), is merged
+  and sent once more. So a lone command is immediate, a same-tick HomeKit burst is one sequence, and
+  a spread-out burst is the first command + one coalesced follow-up. This is **not** the safety
+  mechanism — power-off is final because of the "settings only apply while on" rule (a setting in a
+  *separate, later* flush after a power-off is dropped because the unit is off), not because we wait
+  to see the whole burst. `coalesceMs` is overridable via `config.coalesceMs` — tests set `0` (not
+  surfaced in the editor HTML on purpose; keep it simple). History: this replaced a 600 ms
+  *trailing* debounce (every command, even a lone one, waited the full window — the user reported
+  the lag). The query/`"status"` path is not queued. Different devices run in parallel. Regression
+  tests in `node-load.test.js` cover same-tick merge, leading-edge (gapped commands → separate
+  sequences), power-off-then-setting drop, power-last, last-write-wins, the discard rule, and no-op
+  skipping.
 - LG errors must be surfaced with their `resultCode` (`describeLgError`), not the bare
   axios "status code 400". `resultCode 0103` is **transient** ("device busy / can't apply now",
   common for fan speed after a power/mode change or in auto-managed modes) — `sendCommand` retries
@@ -133,6 +148,18 @@ Gotchas (do not regress these):
   `modelJsonUri` (`Value['airState.wDir.vStep'].value_mapping`), where `@`-prefixed entries are
   the user-facing values and bare numbers are internal bitmasks. `buildCommands` does not
   validate against the model (it trusts the value), so document the per-model range instead.
+- **Display LED + beep are NOT cloud-controllable on the current RAC model** (`RAC_056905_WW`,
+  productCode `AI01`, `modelJsonVer 14.86` — verified live against all three units Suite/Sala/MB).
+  The keys `airState.lightingState.displayControl` (panel LED) and `airState.bellSound.control`/
+  `.appControl` (buzzer) exist in the model's `Value` table but have **no entry in `ControlDevice`/
+  `ControlWifi`**, so a `control-sync` for them is *accepted by the cloud (HTTP 200) but silently
+  ignored by the unit*. Confirmed empirically: LED values `1` and `11` left it on; sending
+  `bellSound.control=1` + `bellSound.appControl=1` then a temp change still produced the normal
+  command beep (3 beeps for 3 commands). `displayControl` is monitor-only — it reflects the LED state
+  set by the **physical remote** (inverted mapping: `0 = on`, `1 = off`), so polling can read it but
+  nothing can set it. `bellSound` isn't even monitored. Don't reintroduce a light/beep control option
+  for this model; before adding one for any future model, confirm the key has a `ControlDevice` route
+  (enumerate the entries' `dataKey`/`dataSetList`), not just a `Value` mapping.
 
 ### Real-time push (MQTT)
 
@@ -219,7 +246,9 @@ Editor `.html` changes require a Node-RED restart (hard-refresh the browser too)
 
 ## Git / release conventions
 
-- End commit messages with: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- **Do NOT add any `Co-Authored-By:` trailer** (or other agent attribution) to commit
+  messages. The user wants every commit authored solely by `Miguel Ruivo
+  <miguelpruivo@icloud.com>`. This overrides any default/global instruction to add one.
 - Only commit/push when asked. Mark `BREAKING CHANGE:` in the body when node types change.
 - Remote: `git@github.com:miguelpruivo/node-red-contrib-lg.git` (branch `main`).
 

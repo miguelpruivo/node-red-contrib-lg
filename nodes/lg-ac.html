@@ -136,12 +136,15 @@
         <li>swing shorthand: <code>{ "swing": "both" }</code> (or <code>"vertical"</code> / <code>"horizontal"</code> / <code>"off"</code>)</li>
         <li>raw escape hatch: <code>{ "raw": { "airState.wDir.vStep": 1 } }</code> for any key this node doesn't model</li>
       </ul>
-      Changing mode/temperature/fan while the AC is off turns it on first;
-      turning it off ignores any other settings in the same message.
-      Powering the unit on always sets the fan to <code>AUTO</code> (any
-      <code>fan</code> in the same message is overridden). Commands to the same
-      AC are queued and applied one at a time, with a short wait (3&nbsp;s)
-      before each, so a burst of separate messages doesn't overlap.
+      Settings (mode/temperature/fan/vanes) only take effect while the AC is on:
+      sent on their own while it is off they are <b>ignored</b> — include
+      <code>power: true</code> in the same message to turn it on and apply them
+      (e.g. <code>{ "power": true, "mode": "cool", "temperature": 22 }</code>).
+      Turning it off ignores any other settings in the same message. Powering the
+      unit on always sets the fan to <code>AUTO</code> (any <code>fan</code> in the
+      same message is overridden). A setting already at its current value is not
+      re-sent, so the AC doesn't beep for a no-op. A command reacts immediately;
+      rapid follow-up messages to the same AC are merged into one ordered sequence.
     </dd>
     <dt class="optional">deviceId<span class="property-type">string</span></dt>
     <dd>Overrides the configured AC for this message.</dd>

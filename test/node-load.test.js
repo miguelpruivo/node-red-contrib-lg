@@ -160,11 +160,16 @@ function runAcControl(payload, getDeviceSnapshot) {
   });
 }
 
-test('lg-ac prepends power-on when changing temperature while AC is off', async () => {
-  const cmds = await runAcControl({ temperature: 22 }, { 'airState.operation': 0 });
+test('lg-ac discards a settings change sent while the AC is off (no auto power-on)', async () => {
+  const cmds = await runAcControl({ temperature: 23 }, { 'airState.operation': 0, 'airState.tempState.target': 22 });
+  assert.strictEqual(cmds.length, 0, 'settings only apply while on — the AC is not switched on for them');
+});
+
+test('lg-ac applies settings sent together with an explicit power-on (while off)', async () => {
+  const cmds = await runAcControl({ power: true, temperature: 23 }, { 'airState.operation': 0, 'airState.tempState.target': 22 });
   assert.strictEqual(cmds[0].dataKey, 'airState.operation');
   assert.strictEqual(cmds[0].dataValue, 1);
-  assert.ok(cmds.some((c) => c.dataKey === 'airState.tempState.target' && c.dataValue === 22));
+  assert.ok(cmds.some((c) => c.dataKey === 'airState.tempState.target' && c.dataValue === 23));
 });
 
 test('lg-ac does NOT prepend power-on when AC is already on', async () => {
@@ -197,12 +202,6 @@ test('lg-ac power-on overrides an explicit fan with AUTO', async () => {
   assert.strictEqual(fans[0].dataValue, 8, 'forced to AUTO, not HIGH');
 });
 
-test('lg-ac forces fan AUTO when implicitly powering on for a setting change', async () => {
-  const cmds = await runAcControl({ temperature: 22 }, { 'airState.operation': 0 });
-  assert.ok(cmds.some((c) => c.dataKey === 'airState.operation' && c.dataValue === 1), 'powers on');
-  assert.ok(cmds.some((c) => c.dataKey === 'airState.windStrength' && c.dataValue === 8), 'fan forced to AUTO');
-});
-
 test('lg-ac does NOT touch the fan when already on (no power-on)', async () => {
   const cmds = await runAcControl({ temperature: 22 }, { 'airState.operation': 1 });
   assert.ok(!cmds.some((c) => c.dataKey === 'airState.windStrength'), 'no forced fan command');
@@ -211,6 +210,43 @@ test('lg-ac does NOT touch the fan when already on (no power-on)', async () => {
 test('lg-ac powering off does not add a fan command', async () => {
   const cmds = await runAcControl({ power: false }, { 'airState.operation': 1 });
   assert.ok(!cmds.some((c) => c.dataKey === 'airState.windStrength'), 'no fan on power-off');
+});
+
+test('lg-ac skips a setting already at the requested value (no command, no beep)', async () => {
+  const cmds = await runAcControl({ temperature: 22 },
+    { 'airState.operation': 1, 'airState.tempState.target': 22 });
+  assert.strictEqual(cmds.length, 0, 'nothing sent when temp already 22');
+});
+
+test('lg-ac still sends a setting that actually changes', async () => {
+  const cmds = await runAcControl({ temperature: 23 },
+    { 'airState.operation': 1, 'airState.tempState.target': 22 });
+  assert.strictEqual(cmds.length, 1);
+  assert.strictEqual(cmds[0].dataKey, 'airState.tempState.target');
+  assert.strictEqual(cmds[0].dataValue, 23);
+});
+
+test('lg-ac only sends the fields that changed in a mixed request', async () => {
+  const cmds = await runAcControl({ temperature: 22, mode: 'COOL', fan: 'HIGH' },
+    { 'airState.operation': 1, 'airState.tempState.target': 22, 'airState.opMode': 0, 'airState.windStrength': 2 });
+  // temp (22) and mode (COOL=0) already match → dropped; only fan HIGH (6) sent.
+  assert.deepStrictEqual(cmds.map((c) => [c.dataKey, c.dataValue]), [['airState.windStrength', 6]]);
+});
+
+test('lg-ac redundant power-on while already on does nothing', async () => {
+  const cmds = await runAcControl({ power: true }, { 'airState.operation': 1 });
+  assert.strictEqual(cmds.length, 0, 'no power-on, no forced fan, no beep');
+});
+
+test('lg-ac power-off while already off does nothing', async () => {
+  const cmds = await runAcControl({ power: false }, { 'airState.operation': 0 });
+  assert.strictEqual(cmds.length, 0);
+});
+
+test('lg-ac no-op setting while off does NOT power the unit on', async () => {
+  const cmds = await runAcControl({ temperature: 22 },
+    { 'airState.operation': 0, 'airState.tempState.target': 22 });
+  assert.strictEqual(cmds.length, 0, 'already at 22 → no spurious power-on');
 });
 
 // Send several messages to one node in the same tick; they coalesce into a single
@@ -268,6 +304,57 @@ test('lg-ac coalesced power-on + setting still forces fan AUTO', async () => {
   assert.strictEqual(commands[0].dataValue, 1, 'powers on first');
   assert.ok(commands.some((c) => c.dataKey === 'airState.tempState.target' && c.dataValue === 22));
   assert.ok(commands.some((c) => c.dataKey === 'airState.windStrength' && c.dataValue === 8), 'fan AUTO');
+});
+
+// Leading-edge driver: a stateful stub whose getDevice reflects commands already
+// sent (so power state changes as the real device would), and an emit() that
+// resolves when that message's done() fires.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function statefulNode(initialSnapshot) {
+  const { RED, instantiate } = makeRED();
+  require('../nodes/lg-ac.js')(RED);
+  const snapshot = Object.assign({}, initialSnapshot);
+  const sent = [];
+  RED.nodes._register('accs', stubAccount({
+    client: {
+      getDevice: async () => ({ snapshot: Object.assign({}, snapshot) }),
+      sendCommands: async (id, cmds) => {
+        sent.push(cmds);
+        for (const c of cmds) { snapshot[c.dataKey] = c.dataValue; }
+        return [];
+      },
+    },
+  }));
+  const node = instantiate('lg-ac', { id: 'acs', account: 'accs', deviceId: 'dev1', coalesceMs: 5 });
+  const emit = (payload) => new Promise((resolve, reject) => {
+    node.emit('input', { payload }, () => {}, (err) => (err ? reject(err) : resolve()));
+  });
+  return { node, sent, snapshot, emit };
+}
+
+test('lg-ac leading-edge: separate (gapped) commands each fire their own sequence', async () => {
+  const h = statefulNode({ 'airState.operation': 1 });
+  await h.emit({ temperature: 23 });
+  await sleep(15);
+  await h.emit({ temperature: 24 });
+  await sleep(15);
+  assert.deepStrictEqual(h.sent.map((s) => s.map((c) => [c.dataKey, c.dataValue])), [
+    [['airState.tempState.target', 23]],
+    [['airState.tempState.target', 24]],
+  ]);
+});
+
+test('lg-ac leading-edge: a setting arriving after a power-off is dropped (stays off)', async () => {
+  const h = statefulNode({ 'airState.operation': 1, 'airState.tempState.target': 22 });
+  await h.emit(false);          // power off
+  await sleep(15);              // window elapses; device is now off
+  await h.emit({ verticalVane: 2 }); // setting while off → discarded, no re-power
+  await sleep(15);
+  assert.strictEqual(h.sent.length, 1, 'only the power-off was sent');
+  assert.strictEqual(h.sent[0][0].dataKey, 'airState.operation');
+  assert.strictEqual(h.sent[0][0].dataValue, 0);
+  assert.strictEqual(Number(h.snapshot['airState.operation']), 0, 'still off');
 });
 
 test('lg-ac always forwards real-time mqtt pushes (account-controlled, even with Poll off)', () => {
