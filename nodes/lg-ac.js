@@ -24,6 +24,7 @@ const DEDUPE_KEYS = new Set([
   C.KEYS.WIND_STRENGTH,
   C.KEYS.VANE_VERTICAL,
   C.KEYS.VANE_HORIZONTAL,
+  C.KEYS.DISPLAY,
 ]);
 
 // True when this command would set a value the device already holds. Conservative:

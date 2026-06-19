@@ -249,6 +249,33 @@ test('lg-ac no-op setting while off does NOT power the unit on', async () => {
   assert.strictEqual(cmds.length, 0, 'already at 22 → no spurious power-on');
 });
 
+test('lg-ac turns the panel display off while the AC is on', async () => {
+  const cmds = await runAcControl({ display: false },
+    { 'airState.operation': 1, 'airState.lightingState.displayControl': 0 });
+  assert.deepStrictEqual(cmds.map((c) => [c.dataKey, c.dataValue]),
+    [['airState.lightingState.displayControl', 1]]);
+});
+
+test('lg-ac discards a display change while the AC is off (display only applies while on)', async () => {
+  const cmds = await runAcControl({ display: false },
+    { 'airState.operation': 0, 'airState.lightingState.displayControl': 0 });
+  assert.strictEqual(cmds.length, 0, 'display is on-only; the AC is not switched on for it');
+});
+
+test('lg-ac applies display together with an explicit power-on', async () => {
+  const cmds = await runAcControl({ power: true, display: false },
+    { 'airState.operation': 0, 'airState.lightingState.displayControl': 0 });
+  assert.strictEqual(cmds[0].dataValue, 1, 'power-on first');
+  assert.ok(cmds.some((c) => c.dataKey === 'airState.lightingState.displayControl' && c.dataValue === 1),
+    'display=off applied after the power-on');
+});
+
+test('lg-ac skips a display change already at the requested value (no beep)', async () => {
+  const cmds = await runAcControl({ display: false },
+    { 'airState.operation': 1, 'airState.lightingState.displayControl': 1 });
+  assert.strictEqual(cmds.length, 0, 'display already off → nothing sent');
+});
+
 // Send several messages to one node in the same tick; they coalesce into a single
 // flush. Resolves once every message's done() has fired.
 function runAcBurst(payloads, getDeviceSnapshot) {

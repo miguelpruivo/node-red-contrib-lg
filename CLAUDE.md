@@ -148,18 +148,26 @@ Gotchas (do not regress these):
   `modelJsonUri` (`Value['airState.wDir.vStep'].value_mapping`), where `@`-prefixed entries are
   the user-facing values and bare numbers are internal bitmasks. `buildCommands` does not
   validate against the model (it trusts the value), so document the per-model range instead.
-- **Display LED + beep are NOT cloud-controllable on the current RAC model** (`RAC_056905_WW`,
-  productCode `AI01`, `modelJsonVer 14.86` — verified live against all three units Suite/Sala/MB).
-  The keys `airState.lightingState.displayControl` (panel LED) and `airState.bellSound.control`/
-  `.appControl` (buzzer) exist in the model's `Value` table but have **no entry in `ControlDevice`/
-  `ControlWifi`**, so a `control-sync` for them is *accepted by the cloud (HTTP 200) but silently
-  ignored by the unit*. Confirmed empirically: LED values `1` and `11` left it on; sending
-  `bellSound.control=1` + `bellSound.appControl=1` then a temp change still produced the normal
-  command beep (3 beeps for 3 commands). `displayControl` is monitor-only — it reflects the LED state
-  set by the **physical remote** (inverted mapping: `0 = on`, `1 = off`), so polling can read it but
-  nothing can set it. `bellSound` isn't even monitored. Don't reintroduce a light/beep control option
-  for this model; before adding one for any future model, confirm the key has a `ControlDevice` route
-  (enumerate the entries' `dataKey`/`dataSetList`), not just a `Value` mapping.
+- **Panel display LED IS cloud-controllable — but only while the unit is on.** Key
+  `airState.lightingState.displayControl` via the plain `basicCtrl`/`Set` `control-sync`, **inverted**:
+  `0 = LED on`, `1 = LED off` (the `_W` values `11/12` are other models). `lg-ac` exposes it as
+  `{ display: true|false }` (built in `buildCommands`, key in `constants.KEYS.DISPLAY`), gated by the
+  same **on-only** rule as mode/temp/fan: a `display` sent while off is **discarded**; send it with
+  `power:true` to apply on power-on. It's in `DEDUPE_KEYS` (no-op skipped) and reported in
+  `parseSnapshot` as `display` (boolean, true = lit). Verified live on Suite (`RAC_056905_WW`,
+  productCode `AI01`, `modelJsonVer 14.86`): the LG app's display toggle wrote `displayControl=1`,
+  and our own `control-sync` then drove it `0`↔`1` with the panel following each time.
+  **Gotcha that misled an earlier version:** `displayControl` is **NOT** in the model's
+  `ControlDevice`/`ControlWifi` table, yet the firmware honours it anyway — so "no `ControlDevice`
+  route" does **not** mean "not settable." The earlier "monitor-only / silently ignored" verdict was a
+  **test artifact**: the command was sent while the unit was **off** (display, like every setting, only
+  applies while on), so it looked ignored. Lesson: don't trust the `ControlDevice` enumeration alone —
+  test live with the unit **on**.
+- **Beep/buzzer (`airState.bellSound.control`/`.appControl`) — still UNCONFIRMED, not exposed.** An
+  earlier live attempt (value `1`) didn't silence the command beep, but that test likely shared the
+  off-state flaw above, and `bellSound` isn't reported in the snapshot either. Re-test with the unit
+  **on** before asserting it's uncontrollable; if it turns out settable, expose it the same on-only way
+  as `display`.
 
 ### Real-time push (MQTT)
 

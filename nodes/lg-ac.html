@@ -134,9 +134,10 @@
         <li>vane direction: <code>{ "verticalVane": 1, "horizontalVane": 1 }</code>
             (1 = top/left … higher = down/right, <code>"swing"</code> = sweep, <code>"off"</code> = stop; valid positions vary by model)</li>
         <li>swing shorthand: <code>{ "swing": "both" }</code> (or <code>"vertical"</code> / <code>"horizontal"</code> / <code>"off"</code>)</li>
+        <li>panel display/LED: <code>{ "display": false }</code> turns the front display off (<code>true</code> = on)</li>
         <li>raw escape hatch: <code>{ "raw": { "airState.wDir.vStep": 1 } }</code> for any key this node doesn't model</li>
       </ul>
-      Settings (mode/temperature/fan/vanes) only take effect while the AC is on:
+      Settings (mode/temperature/fan/vanes/display) only take effect while the AC is on:
       sent on their own while it is off they are <b>ignored</b> — include
       <code>power: true</code> in the same message to turn it on and apply them
       (e.g. <code>{ "power": true, "mode": "cool", "temperature": 22 }</code>).
@@ -156,7 +157,7 @@
     <dd><code>power</code>, <code>mode</code>, <code>currentTemperature</code>,
         <code>targetTemperature</code>, <code>fanSpeed</code>,
         <code>humidity</code>, <code>verticalVane</code>, <code>horizontalVane</code>,
-        <code>online</code>.</dd>
+        <code>display</code> (true = panel lit), <code>online</code>.</dd>
     <dt>event<span class="property-type">string</span></dt>
     <dd><code>initial</code> / <code>change</code> / <code>periodic</code> (from polling),
         <code>command</code> (after a control), <code>query</code> (after a "status" request).</dd>

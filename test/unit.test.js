@@ -87,6 +87,21 @@ test('buildCommands swing shorthand and "off"/"swing" words', () => {
   assert.deepStrictEqual(ac.buildCommands({ verticalVane: 'off' })[0].dataValue, 0);
 });
 
+test('buildCommands maps display on/off to the inverted displayControl key', () => {
+  assert.deepStrictEqual(ac.buildCommands({ display: false }), [
+    { dataKey: 'airState.lightingState.displayControl', dataValue: 1, label: 'display=off' },
+  ]);
+  assert.strictEqual(ac.buildCommands({ display: true })[0].dataValue, 0);
+  assert.strictEqual(ac.buildCommands({ display: 'off' })[0].dataValue, 1);
+  assert.strictEqual(ac.buildCommands({ display: 'on' })[0].dataValue, 0);
+});
+
+test('parseSnapshot reports display state (inverted: 0 = lit)', () => {
+  assert.strictEqual(ac.parseSnapshot({ 'airState.lightingState.displayControl': 0 }).display, true);
+  assert.strictEqual(ac.parseSnapshot({ 'airState.lightingState.displayControl': 1 }).display, false);
+  assert.strictEqual(ac.parseSnapshot({}).display, null);
+});
+
 test('buildCommands raw escape hatch passes keys verbatim', () => {
   const cmds = ac.buildCommands({ raw: { 'airState.wDir.vStep': 1 } });
   assert.deepStrictEqual(cmds, [{ dataKey: 'airState.wDir.vStep', dataValue: 1, label: 'airState.wDir.vStep=1' }]);
