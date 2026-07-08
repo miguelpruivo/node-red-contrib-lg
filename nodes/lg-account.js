@@ -44,7 +44,11 @@ module.exports = function (RED) {
         }
       },
       save: async (t) => {
+        // 0o600 on create; chmod enforces it even when overwriting a file an
+        // older version may have left world-readable. The refresh token is the
+        // long-lived credential for the whole account, so keep it owner-only.
         fs.writeFileSync(tokenFile, t, { mode: 0o600 });
+        try { fs.chmodSync(tokenFile, 0o600); } catch (e) { /* best effort */ }
         node.debug('ThinQ refresh token cached to disk');
       },
     };
@@ -70,7 +74,10 @@ module.exports = function (RED) {
         }
       },
       save: async (keys) => {
+        // Contains the MQTT client's RSA private key — owner-only, enforced on
+        // overwrite too (see the token store above for the rationale).
         fs.writeFileSync(mqttKeyFile, JSON.stringify(keys), { mode: 0o600 });
+        try { fs.chmodSync(mqttKeyFile, 0o600); } catch (e) { /* best effort */ }
       },
     };
 
