@@ -6,6 +6,7 @@ const assert = require('node:assert');
 const ac = require('../lib/thinq/ac');
 const wol = require('../lib/webos/wol');
 const { interpretPowerState, isPoweredOn, WebosTv } = require('../lib/webos/tv');
+const { ThinQClient, parseTokenPayload } = require('../lib/thinq/client');
 const { parseMessage, createCsr, generatePrivateKey } = require('../lib/thinq/mqtt');
 
 test('parseSnapshot reads temperature even when AC is off', () => {
@@ -346,4 +347,96 @@ test('WebosTv: stop() cancels a pending off-grace timer', async () => {
   tv.stop();
   await sleep(60);
   assert.deepStrictEqual(events, [], 'no OFF after the node was stopped');
+});
+
+// ---------------------------------------------------------------------------
+// GitHub issue #1: token not cached on disk + "not exist refresh token".
+// The OAuth backend that issued the refresh token is account-bound and only
+// discoverable during a full login, so it must be persisted with the token,
+// and a rejected refresh must fall back to a fresh username/password login.
+// ---------------------------------------------------------------------------
+
+test('parseTokenPayload accepts the JSON payload and legacy plain-string token files', () => {
+  assert.deepStrictEqual(
+    parseTokenPayload(JSON.stringify({ refreshToken: 'rt-1', lgeapiUrl: 'https://eu.lgeapi.com/' })),
+    { refreshToken: 'rt-1', lgeapiUrl: 'https://eu.lgeapi.com/' }
+  );
+  assert.deepStrictEqual(parseTokenPayload('legacy-token\n'), {
+    refreshToken: 'legacy-token',
+    lgeapiUrl: null,
+  });
+  assert.strictEqual(parseTokenPayload(''), null);
+  assert.strictEqual(parseTokenPayload(null), null);
+  assert.strictEqual(parseTokenPayload('{not json'), null);
+});
+
+test('ThinQClient adopts the stored OAuth backend URL and caches the token payload to disk', async () => {
+  const saved = [];
+  const store = {
+    load: async () => JSON.stringify({ refreshToken: 'stored-rt', lgeapiUrl: 'https://eu.lgeapi.com/' }),
+    save: async (t) => saved.push(t),
+  };
+  const client = new ThinQClient({ country: 'US', refreshToken: 'cred-rt', tokenStore: store });
+  client.getGateway = async () => ({});
+  client.refreshAccessToken = async () => {
+    client.accessToken = 'at';
+    client.expiresAt = Math.round(Date.now() / 1000) + 3600;
+  };
+  client.getUserNumber = async () => {
+    client.userNumber = 'U1';
+  };
+
+  await client.ready();
+
+  assert.strictEqual(client.refreshToken, 'cred-rt', 'credential token takes precedence over the stored one');
+  assert.strictEqual(client.lgeapiUrl, 'https://eu.lgeapi.com/', 'stored issuing backend is adopted');
+  assert.strictEqual(saved.length, 1, 'token payload cached to disk even without a fresh login');
+  assert.deepStrictEqual(JSON.parse(saved[0]), {
+    refreshToken: 'cred-rt',
+    lgeapiUrl: 'https://eu.lgeapi.com/',
+  });
+});
+
+test('ThinQClient falls back to a full login when the refresh token is rejected', async () => {
+  const client = new ThinQClient({
+    country: 'US',
+    username: 'user@example.com',
+    password: 'pw',
+    refreshToken: 'rejected-rt',
+  });
+  // LG rejects the refresh (e.g. "not exist refresh token" from the wrong
+  // regional backend). The stub covers both the best-effort regional lookup
+  // and the token request itself.
+  client.http = {
+    post: async () => {
+      const err = new Error('Request failed with status code 400');
+      err.response = { status: 400, data: { error: { message: 'not exist refresh token' } } };
+      throw err;
+    },
+  };
+  let loginCalls = 0;
+  client.login = async () => {
+    loginCalls += 1;
+    client.accessToken = 'fresh-at';
+    client.refreshToken = 'fresh-rt';
+    client.expiresAt = Math.round(Date.now() / 1000) + 3600;
+    return client.refreshToken;
+  };
+
+  const accessToken = await client.refreshAccessToken();
+  assert.strictEqual(loginCalls, 1, 'fell back to a full login');
+  assert.strictEqual(accessToken, 'fresh-at');
+  assert.strictEqual(client.refreshToken, 'fresh-rt');
+});
+
+test('ThinQClient refresh failure without stored credentials still surfaces the LG error', async () => {
+  const client = new ThinQClient({ country: 'US', refreshToken: 'rejected-rt' });
+  client.http = {
+    post: async () => {
+      const err = new Error('Request failed with status code 400');
+      err.response = { status: 400, data: { error: { message: 'not exist refresh token' } } };
+      throw err;
+    },
+  };
+  await assert.rejects(() => client.refreshAccessToken(), /not exist refresh token/);
 });

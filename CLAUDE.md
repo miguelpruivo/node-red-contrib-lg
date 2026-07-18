@@ -82,6 +82,17 @@ Gotchas (do not regress these):
   `decodeUrlMaybe` in `client.js`. (The test account resolved to the **GB** region.)
 - The OAuth signature timestamp must be **RFC 2822 with `+0000`**, not `GMT`. We build
   it from `Date.toUTCString().replace(' GMT', ' +0000')` (`rfc2822`).
+- **Refresh tokens are bound to the regional OAuth backend that issued them** (the
+  `oauth2_backend_url` learned during login). Refreshing against another backend fails with
+  LG's "not exist refresh token" (GitHub issue #1: worked at "Extract refresh token", then
+  every poll failed and the token file never appeared, because `_persistToken` only ran in
+  `login()` and there was no fallback). So: the token store payload is JSON
+  `{ refreshToken, lgeapiUrl }` (legacy bare-string files still parse — `parseTokenPayload`);
+  a stored `lgeapiUrl` is authoritative (`_lgeapiAuthoritative`) and suppresses the flaky
+  legacy `kic.lgthinq.com` region lookup; `_doReady` persists the payload even when the
+  token came from node credentials; and a rejected refresh **falls back to a full
+  username/password login** when credentials exist (self-heals wrong-backend and revoked
+  tokens). Regression tests in `unit.test.js`.
 - An AC **rejects mode/temperature/fan changes while it is off** (HTTP 400, resultCode
   `0001`). `lg-ac` therefore treats settings as **on-only**: a setting takes effect only when
   the unit *ends up on*. Decision in `flush()`: power-off → send `power=0` only (drop settings);
