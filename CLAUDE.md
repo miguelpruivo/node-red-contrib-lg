@@ -192,7 +192,8 @@ remote, the LG app) emit instantly instead of waiting for a poll.
 - On = **Wake-on-LAN** magic packet (needs MAC + "Mobile TV On" enabled on the TV).
   Off = `ssap://system/turnOff`.
 - Power state via `ssap://com.webos.service.tvpower/power/getPowerState` subscription, with
-  the websocket connection state as a fallback. Off detection ≈ instant; on detection ≈
+  the websocket connection state as a fallback. Off detection ≈ instant for a normal
+  power-off (the subscription announces `Suspend` before the socket dies); on detection ≈
   within the `reconnect` interval (default 5 s) because we retry-connect while off.
 - **Screensaver is NOT off (gotcha).** `interpretPowerState` returns a descriptive *label*
   (Active→`On`, `Screen Saver`, `Screen Off`, `Screen On`, Suspend→`Off`, Active Standby→
@@ -201,8 +202,21 @@ remote, the LG app) emit instantly instead of waiting for a poll.
   reported as ON**. The screensaver and a blanked panel are panel states while the unit is
   still powered; mapping only `Active` to on (the old bug) flipped to `off` when the
   screensaver started and back to `on` on the next remote press. A genuine power-off is the
-  `Off`/`Pixel Refresher` state *and* a dropped websocket (`close` forces off). There IS a
-  regression test (`isPoweredOn …`).
+  `Off`/`Pixel Refresher` state; a dropped websocket also means off, but only after the
+  off-grace below. There IS a regression test (`isPoweredOn …`).
+- **A dropped websocket is NOT instantly off (off-grace, gotcha).** Transient drops happen
+  while the TV is on — Wi-Fi hiccups, a busy TV missing a keepalive pong (the ws config
+  drops the link when a ping isn't answered within 5 s), webOS-side resets — and `lgtv2`
+  auto-reconnects a few seconds later. An earlier version reported off on every `close`,
+  which flapped the state off→on a few seconds apart (sometimes repeatedly, until the TV —
+  whose degraded network stack was causing the drops — was restarted). `_handleDisconnect`
+  therefore starts a grace timer (`offGraceMs`, default `reconnect + 5 s`) only when the TV
+  was believed ON; any power-state update cancels it (`_setPower` clears the timer) and off
+  is reported only if still disconnected when it fires. A real power-off is unaffected
+  (`Suspend` arrives via the subscription before the socket dies → still instant); only a
+  hard cut (unplug/power failure) is detected ~`offGraceMs` later. `offGraceMs` is a
+  constructor option (tests pass tiny values; not surfaced in the editor on purpose).
+  Regression tests in `unit.test.js`.
 - First connection needs a one-time **pairing prompt** accepted on the TV; the key is saved
   to `webos-<id>.key`.
 

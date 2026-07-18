@@ -254,3 +254,96 @@ test('WebosTv._emitError never throws when nobody listens (offline TV cannot cra
   tv._emitError(new Error('boom'));
   assert.strictEqual(received.message, 'boom');
 });
+
+// ---------------------------------------------------------------------------
+// Off-grace on websocket close: a transient connection drop while the TV is ON
+// must not flap the reported power off->on. A real power-off is announced by
+// the power-state subscription (Suspend) before the socket dies, so that path
+// stays instant. Simulated via _handleDisconnect() (the lgtv2 'close' handler)
+// without opening any real socket.
+// ---------------------------------------------------------------------------
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function onlineTv(name, offGraceMs) {
+  const tv = new WebosTv({ host: '127.0.0.1', name, offGraceMs });
+  tv.connected = true;
+  tv._setPower(true, 'On', { state: 'Active' });
+  return tv;
+}
+
+test('WebosTv: transient websocket drop + reconnect does not flap power off/on', async () => {
+  const tv = onlineTv('flappy', 40);
+  const events = [];
+  tv.on('powerStateChanged', (e) => events.push(e));
+
+  // Websocket drops (Wi-Fi hiccup / keepalive timeout), no Suspend announced.
+  tv._handleDisconnect();
+  assert.deepStrictEqual(events, [], 'no immediate OFF on a bare socket close');
+  assert.strictEqual(tv.powerOn, true);
+
+  // lgtv2 reconnects and the power-state subscription confirms ON in time.
+  tv.connected = true;
+  tv._setPower(true, 'On', { state: 'Active' });
+
+  await sleep(90); // well past offGraceMs
+  assert.deepStrictEqual(events, [], 'no OFF/ON flap after a successful reconnect');
+  assert.strictEqual(tv.powerOn, true);
+  tv.stop();
+});
+
+test('WebosTv: TV unreachable past the grace window is reported off', async () => {
+  const tv = onlineTv('gone', 30);
+  const events = [];
+  tv.on('powerStateChanged', (e) => events.push(e));
+
+  tv._handleDisconnect();
+  assert.deepStrictEqual(events, [], 'off is deferred, not immediate');
+  await sleep(70);
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].power, false);
+  assert.strictEqual(tv.powerOn, false);
+  tv.stop();
+});
+
+test('WebosTv: subscription-announced power-off stays instant', () => {
+  const tv = onlineTv('real-off', 5000);
+  const events = [];
+  tv.on('powerStateChanged', (e) => events.push(e));
+
+  // The TV announces Suspend on the subscription BEFORE the socket dies.
+  tv._setPower(false, 'Off', { state: 'Suspend' });
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(events[0].power, false);
+
+  // The socket close that follows must not schedule a grace timer.
+  tv._handleDisconnect();
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(tv._offGraceTimer, null);
+  tv.stop();
+});
+
+test('WebosTv: repeated closes while the grace timer runs do not stack timers or events', async () => {
+  const tv = onlineTv('churn', 40);
+  const events = [];
+  tv.on('powerStateChanged', (e) => events.push(e));
+
+  tv._handleDisconnect();
+  tv._handleDisconnect();
+  tv._handleDisconnect();
+  await sleep(90);
+  assert.strictEqual(events.length, 1, 'exactly one OFF event');
+  assert.strictEqual(events[0].power, false);
+  tv.stop();
+});
+
+test('WebosTv: stop() cancels a pending off-grace timer', async () => {
+  const tv = onlineTv('stopped', 30);
+  const events = [];
+  tv.on('powerStateChanged', (e) => events.push(e));
+
+  tv._handleDisconnect();
+  tv.stop();
+  await sleep(60);
+  assert.deepStrictEqual(events, [], 'no OFF after the node was stopped');
+});

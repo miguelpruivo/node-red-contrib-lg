@@ -106,7 +106,9 @@
   </dl>
 
   <h3>Detection speed</h3>
-  <p>While the TV is on, an off is detected almost immediately. While the TV is
+  <p>While the TV is on, a power-off is detected almost immediately. While the TV is
   off, the node retries connecting every <b>Reconnect</b> seconds, so a turn-on
-  is detected within that interval.</p>
+  is detected within that interval. Brief network drops are ridden out: the node
+  waits a few seconds for the connection to come back before reporting the TV off,
+  so a Wi-Fi hiccup does not flap the state off/on.</p>
 </script>
