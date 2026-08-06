@@ -134,6 +134,33 @@ test('interpretPowerState maps webOS responses', () => {
   assert.strictEqual(interpretPowerState(null), 'Off');
 });
 
+// Captured live from a real TV powered off with the remote. webOS announces the
+// power-off immediately but keeps state:'Active' for ~3.2s afterwards, so
+// reading `state` alone reported ON for that whole window — the power-off lag.
+test('interpretPowerState reports off the moment the remote announces it', () => {
+  const seq = [
+    { returnValue: true, state: 'Active', processing: 'Request Power Off', onOff: 'off', reason: 'remoteKey' },
+    { returnValue: true, state: 'Active', processing: 'Request Power Off Logo', onOff: 'off', reason: 'remoteKey' },
+    { returnValue: true, state: 'Active', processing: 'Request Active Standby', onOff: 'off', reason: 'remoteKey' },
+    { returnValue: true, state: 'Active', processing: 'Prepare Active Standby', onOff: 'off', reason: 'remoteKey' },
+  ];
+  for (const res of seq) {
+    const label = interpretPowerState(res);
+    assert.strictEqual(label, 'Off', `${res.processing} must read as Off`);
+    assert.strictEqual(isPoweredOn(label), false);
+  }
+  // ...and the state that used to be the first OFF signal still is one.
+  assert.strictEqual(isPoweredOn(interpretPowerState({ state: 'Active Standby' })), false);
+});
+
+test('interpretPowerState does not read a waking TV as powering down', () => {
+  // 'Request Active' must NOT match the 'active standby' power-down phrase.
+  assert.strictEqual(isPoweredOn(interpretPowerState({ state: 'Suspend', processing: 'Request Active', onOff: 'on' })), true);
+  assert.strictEqual(interpretPowerState({ state: 'Active', processing: 'Request Screen Saver' }), 'Unknown');
+  // Steady-state ON, exactly as the live subscription delivers it.
+  assert.strictEqual(interpretPowerState({ state: 'Active', subscribed: true, returnValue: true }), 'On');
+});
+
 test('isPoweredOn treats screensaver/screen-off as ON, only Suspend/Pixel Refresher as OFF', () => {
   // Panel states while the TV is still powered -> ON (no spurious off event).
   assert.strictEqual(isPoweredOn('On'), true);
@@ -224,6 +251,40 @@ test('sendCommand does NOT retry a non-transient error', async () => {
   };
   await assert.rejects(() => c.sendCommand('dev', 'k', 1, { retryDelayMs: 1 }), /bad value/);
   assert.strictEqual(calls, 1);
+});
+
+// A boot-time network failure says nothing about the refresh token: falling
+// back to a full username/password login there burns five requests that cannot
+// succeed either, slowing the failed poll down and hammering LG's rate-limited
+// login endpoints once per poll interval until the uplink is up.
+test('refreshAccessToken does NOT full-login on a bare network error', async () => {
+  const { ThinQClient } = require('../lib/thinq/client');
+  const c = new ThinQClient({ username: 'u', password: 'p', refreshToken: 'rt' });
+  c._lgeapiAuthoritative = true; // skip the legacy region lookup
+  let logins = 0;
+  c.login = async () => { logins += 1; };
+  c.http = { post: async () => { const e = new Error('getaddrinfo ENOTFOUND'); e.code = 'ENOTFOUND'; throw e; } };
+
+  await assert.rejects(() => c.refreshAccessToken(), /token refresh failed/);
+  assert.strictEqual(logins, 0, 'no doomed login attempt without a response from LG');
+});
+
+test('refreshAccessToken still full-logins when LG actually rejects the token', async () => {
+  const { ThinQClient } = require('../lib/thinq/client');
+  const c = new ThinQClient({ username: 'u', password: 'p', refreshToken: 'rt' });
+  c._lgeapiAuthoritative = true;
+  let logins = 0;
+  c.login = async () => { logins += 1; c.accessToken = 'fresh'; };
+  c.http = {
+    post: async () => {
+      const e = new Error('Request failed with status code 400');
+      e.response = { status: 400, data: { error: { message: 'not exist refresh token' } } };
+      throw e;
+    },
+  };
+
+  assert.strictEqual(await c.refreshAccessToken(), 'fresh');
+  assert.strictEqual(logins, 1, 'an LG rejection is still self-healed by a fresh login');
 });
 
 test('mqtt parseMessage extracts deviceId + reported delta', () => {
@@ -336,6 +397,99 @@ test('WebosTv: repeated closes while the grace timer runs do not stack timers or
   assert.strictEqual(events.length, 1, 'exactly one OFF event');
   assert.strictEqual(events[0].power, false);
   tv.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Connection watchdog. lgtv2 only reconnects from its 'connectFailed'/'close'
+// handlers, so an attempt that gets stuck (TV accepts the socket but never
+// answers the pairing 'register' — which has no timeout in lgtv2 — or a dark
+// NIC black-holing the connect) emits nothing at all and never recovers. The
+// watchdog notices the silence and rebuilds the client.
+// ---------------------------------------------------------------------------
+
+test('WebosTv: a stuck connection attempt is detected and the client rebuilt', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'wedged', watchdogMs: 40 });
+  let restarts = 0;
+  tv._restart = () => { restarts += 1; tv._noteActivity(); };
+
+  tv._noteActivity();
+  tv._checkStalled();
+  assert.strictEqual(restarts, 0, 'fresh activity is not stale');
+
+  await sleep(60); // silence past watchdogMs
+  tv._checkStalled();
+  assert.strictEqual(restarts, 1, 'silence past the window rebuilds the client');
+  tv.stop();
+});
+
+test('WebosTv: a connected TV is never restarted by the watchdog', () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'healthy', watchdogMs: 30 });
+  let restarts = 0;
+  tv._restart = () => { restarts += 1; };
+  tv.connected = true;
+  tv._lastActivityAt = Date.now() - 10000; // stale timestamp, but connected
+
+  tv._checkStalled();
+  assert.strictEqual(restarts, 0);
+  tv.stop();
+});
+
+test('WebosTv: watchdog reports off when the TV was never reachable', () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'dark', watchdogMs: 30 });
+  tv._restart = () => {}; // don't open sockets in tests
+  const events = [];
+  tv.on('powerStateChanged', (e) => events.push(e));
+
+  assert.strictEqual(tv.powerOn, null, 'starts unknown');
+  tv._startedAt = Date.now() - 100; // a full window of failed attempts
+  tv._lastActivityAt = Date.now();  // ...but still cycling, so no restart
+  tv._checkStalled();
+
+  assert.strictEqual(events.length, 1, 'a dark TV still publishes an initial state');
+  assert.strictEqual(events[0].power, false);
+  tv.stop();
+});
+
+test('WebosTv: an unproven ws->wss fallback is reverted on a watchdog restart', () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'reset-flip', secure: false });
+  tv._teardownClient = () => {};
+  tv._setup = () => {};
+
+  // A TV in standby resets the ws upgrade too, so this fallback fires on
+  // healthy hardware — it must not strand us on a port the TV may not serve.
+  tv.secure = true;
+  tv._restart({ resetTransport: true });
+  assert.strictEqual(tv.secure, false, 'unproven secure mode reverts to configured');
+
+  // Once a handshake has completed on a transport, keep it.
+  tv.secure = true;
+  tv._provenSecure = true;
+  tv._restart({ resetTransport: true });
+  assert.strictEqual(tv.secure, true, 'a proven transport survives a restart');
+  tv.stop();
+});
+
+// Regression: the ws->wss fallback restarts the client to apply the flip. When
+// _restart() unconditionally reverted an unproven transport it undid that flip
+// immediately, looping forever on a port the TV refuses (caught live against a
+// real TV, which always RSTs plain ws and only serves wss).
+test('WebosTv: the ws->wss fallback restart does NOT undo its own flip', () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'fallback', secure: false });
+  tv._teardownClient = () => {};
+  tv._setup = () => {};
+
+  tv.secure = true;      // what the ECONNRESET handler just set
+  tv._restart();         // ...and how it applies it
+  assert.strictEqual(tv.secure, true, 'the fallback flip survives its own restart');
+  tv.stop();
+});
+
+test('WebosTv: stop() cancels the watchdog', () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'watchdog-stop', watchdogMs: 30 });
+  tv._startWatchdog();
+  assert.ok(tv._watchdogTimer, 'watchdog armed');
+  tv.stop();
+  assert.strictEqual(tv._watchdogTimer, null, 'watchdog cleared on stop');
 });
 
 test('WebosTv: stop() cancels a pending off-grace timer', async () => {

@@ -92,6 +92,32 @@ module.exports = function (RED) {
     let pollTimer = null;
     let polling = false;
     let subscribers = 0;
+    let pollFailures = 0;
+    let retryTimer = null;
+
+    // A failed poll used to wait a whole pollInterval (60s by default) before
+    // trying again, which is exactly the wrong behaviour right after a restart:
+    // the host's network/DNS is often not up yet, so the immediate first poll
+    // fails and the ACs stay blank for a minute or more even though the network
+    // recovered seconds later. Retry quickly at first, then back off to the
+    // normal interval so a genuine outage does not hammer LG.
+    const RETRY_BACKOFF_MS = [5000, 10000, 20000, 40000];
+
+    function scheduleRetry() {
+      if (retryTimer || !pollTimer) {
+        return; // a retry is already armed, or polling has been stopped
+      }
+      const step = RETRY_BACKOFF_MS[Math.min(pollFailures - 1, RETRY_BACKOFF_MS.length - 1)];
+      const delay = Math.min(step, node.pollInterval * 1000);
+      node.debug(`ThinQ: poll failed (${pollFailures}), retrying in ${delay}ms`);
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        poll();
+      }, delay);
+      if (retryTimer.unref) {
+        retryTimer.unref();
+      }
+    }
 
     async function poll() {
       if (polling) {
@@ -119,10 +145,13 @@ module.exports = function (RED) {
             source: 'poll',
           });
         }
+        pollFailures = 0;
         node.status({ fill: 'green', shape: 'dot', text: `${devices.length} device(s)` });
       } catch (err) {
+        pollFailures += 1;
         node.warn('ThinQ poll error: ' + err.message);
         node.status({ fill: 'red', shape: 'ring', text: 'auth/poll error' });
+        scheduleRetry();
       } finally {
         polling = false;
       }
@@ -235,6 +264,10 @@ module.exports = function (RED) {
         clearInterval(pollTimer);
       }
       pollTimer = null;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
       if (mqttRetryTimer) {
         clearTimeout(mqttRetryTimer);
         mqttRetryTimer = null;

@@ -139,6 +139,20 @@ Gotchas (do not regress these):
   tests in `node-load.test.js` cover same-tick merge, leading-edge (gapped commands → separate
   sequences), power-off-then-setting drop, power-last, last-write-wins, the discard rule, and no-op
   skipping.
+- **A failed poll retries with backoff, not a full interval later.** The account node already
+  polls immediately on the first subscriber (`subscribe` → `startPolling` → `poll()` before the
+  `setInterval`), so "no data after a restart" was never a missing initial poll — it was the
+  *failure* path: right after a host reboot the network/DNS often isn't up, that first poll
+  failed, and the next attempt was a whole `pollInterval` (60 s default) away, with `lg-ac` nodes
+  sitting on a grey "waiting…" and the error status landing on the invisible config node. Poll
+  failures now schedule a one-shot retry at 5 s → 10 s → 20 s → 40 s (capped at `pollInterval`),
+  reset on the first success.
+- **A refresh-token failure only falls back to a full login when LG actually answered.**
+  `refreshAccessToken`'s catch used to treat *any* error as a possibly-bad token, so a bare
+  `ENOTFOUND`/`ECONNREFUSED` at boot burned a five-request login that couldn't succeed either —
+  slowing each failed poll down and hammering LG's rate-limited login endpoints once per
+  interval. It now rethrows when `err.response` is absent; the issue-#1 self-heal still runs for
+  a genuine LG rejection.
 - LG errors must be surfaced with their `resultCode` (`describeLgError`), not the bare
   axios "status code 400". `resultCode 0103` is **transient** ("device busy / can't apply now",
   common for fan speed after a power/mode change or in auto-managed modes) — `sendCommand` retries
@@ -206,6 +220,23 @@ remote, the LG app) emit instantly instead of waiting for a poll.
   the websocket connection state as a fallback. Off detection ≈ instant for a normal
   power-off (the subscription announces `Suspend` before the socket dies); on detection ≈
   within the `reconnect` interval (default 5 s) because we retry-connect while off.
+- **A remote power-off is announced ~3.2 s before `state` catches up (gotcha).** Captured live
+  from a real TV powered off with the remote:
+  ```
+  t+0.00  {state:'Active', processing:'Request Power Off',      onOff:'off', reason:'remoteKey'}
+  t+0.04  {state:'Active', processing:'Request Power Off Logo', onOff:'off', reason:'remoteKey'}
+  t+3.12  {state:'Active', processing:'Request Active Standby', onOff:'off', reason:'remoteKey'}
+  t+3.18  {state:'Active', processing:'Prepare Active Standby', onOff:'off', reason:'remoteKey'}
+  t+3.20  {state:'Active Standby'}
+  ```
+  `interpretPowerState` only matched `processing === 'Request Suspend'`, so all four announcement
+  messages fell through to `'Unknown'` → **reported ON**, and off was only detected on the last
+  line. That 3.2 s — *not* the off-grace timer — was the user-reported "power-off takes a few
+  seconds". `isPoweringDown` now matches the phrase (`/power off|active standby|suspend/i`) plus a
+  bare `onOff:'off'`, so off is reported on the **first** message, instantly. Deliberately does not
+  match a bare `Request Active` (that is the TV *waking*). This is a positive announcement from the
+  TV, not an inference from a dropped socket, so it cannot reintroduce the off/on flapping the
+  off-grace timer exists to prevent. Regression tests use the captured payloads verbatim.
 - **Screensaver is NOT off (gotcha).** `interpretPowerState` returns a descriptive *label*
   (Active→`On`, `Screen Saver`, `Screen Off`, `Screen On`, Suspend→`Off`, Active Standby→
   `Pixel Refresher`, …) but `isPoweredOn(label)` decides the boolean: only `Off` and
@@ -228,8 +259,45 @@ remote, the LG app) emit instantly instead of waiting for a poll.
   hard cut (unplug/power failure) is detected ~`offGraceMs` later. `offGraceMs` is a
   constructor option (tests pass tiny values; not surfaced in the editor on purpose).
   Regression tests in `unit.test.js`.
+- **A stuck connection attempt used to be permanent (watchdog, gotcha).** `lgtv2` only
+  schedules a reconnect from its `connectFailed` and `close` handlers, and it arms a response
+  timeout for `'request'` messages **only** — never for the pairing `'register'` message
+  (`lgtv2/index.js`, `case 'register'` just stores the callback). So a TV that accepts the
+  websocket but never answers `register` (webOS still booting, or a wedged ssap service) left
+  the client **open, silent and unrecoverable**: no `connect`, no `close`, no reconnect, ever,
+  until a redeploy. ws keepalive can't save it either — `handleSocketData` resets both the
+  keepalive and grace timers on *any* inbound bytes, and the TV's framing layer keeps answering
+  pings while its app layer is wedged. This is the "TV sometimes never reports on" report.
+  `_startWatchdog`/`_checkStalled` fix it: a healthy *disconnected* client emits `'connecting'`
+  (never deduped by lgtv2, unlike `'error'`) plus a close/error every `reconnect` ms, so silence
+  past `watchdogMs` means stuck → `_restart()` builds a fresh client. Default `watchdogMs` =
+  `max(30 s, reconnect × 6)`; the headroom matters because a **dark** TV legitimately cycles at
+  ~12 s (measured: `ENETUNREACH` after ~7.1 s + 5 s reconnect) and must not be mistaken for a
+  stall. Verified live against a server that accepts and never handshakes: one connection before,
+  recycling every ~8 s after. `watchdogMs` is a constructor option (not surfaced in the editor).
+- **A TV in standby also resets the ws upgrade (gotcha).** Measured on a real TV in standby:
+  ports 3000 *and* 3001 stay open and answer in ~1 ms, `ws://:3000` returns **ECONNRESET** on the
+  upgrade, and `wss://:3001` completes the upgrade then closes with **1008**. So the `ECONNRESET
+  → this.secure = true` fallback fires on perfectly healthy hardware, and it used to be permanent
+  for the node's lifetime — one stray reset could strand a TV that only serves 3000. `_restart()`
+  now reverts `secure` to the configured value **unless** a handshake has actually completed on
+  the current transport (`_provenSecure`). Corollary: **a TCP port probe cannot tell on from off**
+  on this hardware — the ports are open in standby. Don't build off-detection on one.
+  **Trap (hit once, caught live):** the ws→wss fallback *applies* its flip by calling `_restart()`,
+  so that revert must be opt-in — `_restart({ resetTransport: true })`, watchdog only. Reverting
+  unconditionally makes the fallback undo its own flip and spin in a **tight CPU-pegging loop**
+  (flip → restart → revert → ECONNRESET → flip …) against any TV that refuses plain ws — which is
+  every TV tested. Unit tests all passed; only real hardware caught it. There is a regression test.
+- **A dark TV publishes no state at all without help.** A TV whose NIC is off produces only
+  connect failures — never a `close` — so `powerOn` stayed `null` forever and the node emitted
+  nothing after a restart. `_checkStalled` now publishes an initial `off` once a full watchdog
+  window of failed attempts has elapsed with no state yet.
 - First connection needs a one-time **pairing prompt** accepted on the TV; the key is saved
   to `webos-<id>.key`.
+- **Reference point:** `hobbyquaker/node-red-contrib-lgtv` (by the lgtv2 author) reports off
+  **immediately on socket `close`**, with no power-state subscription and no grace period. That
+  is why it felt instant — and why it flaps on every Wi-Fi hiccup. Our grace timer is the
+  deliberate trade; don't "fix" the latency by reverting to bare-close detection.
 
 **Critical gotcha — never crash Node-RED:** an EventEmitter that emits `'error'` with no
 listener throws an uncaught exception (fatal in Node-RED). An offline TV fails to connect
