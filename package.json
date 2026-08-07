@@ -29,7 +29,8 @@
   "files": [
     "nodes/",
     "lib/",
-    "examples/"
+    "examples/",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
