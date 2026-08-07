@@ -280,14 +280,31 @@ remote, the LG app) emit instantly instead of waiting for a poll.
   upgrade, and `wss://:3001` completes the upgrade then closes with **1008**. So the `ECONNRESET
   → this.secure = true` fallback fires on perfectly healthy hardware, and it used to be permanent
   for the node's lifetime — one stray reset could strand a TV that only serves 3000. `_restart()`
-  now reverts `secure` to the configured value **unless** a handshake has actually completed on
-  the current transport (`_provenSecure`). Corollary: **a TCP port probe cannot tell on from off**
-  on this hardware — the ports are open in standby. Don't build off-detection on one.
+  Corollary: **a TCP port probe cannot tell on from off** on this hardware — the ports are open in
+  standby. Don't build off-detection on one.
+- **Transport is auto-detected; `secure` is only a starting point.** Old TVs serve only
+  `ws://:3000`, newer ones can refuse it and require `wss://:3001`, and (per the probe result
+  above) nothing but the handshake outcome distinguishes them. Two mechanisms: the **fast path**
+  flips ws→wss on `ECONNRESET` (~10 ms, measured), and the **watchdog** alternates ws↔wss whenever
+  the current transport has gone a full `watchdogMs` without ever completing a pairing handshake
+  (`_transportSince`). The ECONNRESET path only fires while insecure, so the watchdog is what
+  rescues a wrongly-ticked Secure box (wss→ws), which previously stranded the node forever.
+  Whichever transport pairs sets `_provenSecure` and is **locked in for the node's lifetime** —
+  alternation is a bootstrap mechanism, never a steady state. Verified live: 3 clean flips in 70 s
+  against a dark TV, with no extra connection volume (it only changes which port the existing
+  retry loop uses). `_transportSince` is seeded to `Date.now()` in the constructor — an unset
+  clock reads as "expired" and would alternate on the first tick.
   **Trap (hit once, caught live):** the ws→wss fallback *applies* its flip by calling `_restart()`,
-  so that revert must be opt-in — `_restart({ resetTransport: true })`, watchdog only. Reverting
-  unconditionally makes the fallback undo its own flip and spin in a **tight CPU-pegging loop**
-  (flip → restart → revert → ECONNRESET → flip …) against any TV that refuses plain ws — which is
-  every TV tested. Unit tests all passed; only real hardware caught it. There is a regression test.
+  so `_restart()` must never touch `secure` itself. An earlier version reverted an unproven
+  transport there, which made the fallback undo its own flip and spin in a **tight CPU-pegging
+  loop** (flip → restart → revert → ECONNRESET → flip …) against any TV that refuses plain ws —
+  which is every TV tested. All unit tests passed; only real hardware caught it. Transport policy
+  now lives in the `_setTransport` callers (the error handler and `_checkStalled`) and nowhere
+  else. There is a regression test.
+- **A TV in standby eventually drops its NIC entirely.** Measured on the same TV within one
+  session: shortly after power-off both ports answered in ~1 ms; later every connect returned
+  `ENETUNREACH`. So "reachable in standby" is not a stable property — don't assume a TV that
+  answered a moment ago still will, and don't treat unreachability as a fault.
 - **A dark TV publishes no state at all without help.** A TV whose NIC is off produces only
   connect failures — never a `close` — so `powerOn` stayed `null` forever and the node emitted
   nothing after a restart. `_checkStalled` now publishes an initial `off` once a full watchdog

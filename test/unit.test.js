@@ -450,22 +450,51 @@ test('WebosTv: watchdog reports off when the TV was never reachable', () => {
   tv.stop();
 });
 
-test('WebosTv: an unproven ws->wss fallback is reverted on a watchdog restart', () => {
-  const tv = new WebosTv({ host: '127.0.0.1', name: 'reset-flip', secure: false });
+// Transport is auto-detected: `secure` is only a starting point. Old TVs serve
+// only ws://:3000, newer ones can refuse it and require wss://:3001, and a port
+// probe cannot tell them apart (a standby TV holds BOTH ports open yet refuses
+// the upgrade on one). The handshake outcome is the only usable signal.
+function unprovenTv(secure) {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'transport', secure, watchdogMs: 30 });
   tv._teardownClient = () => {};
   tv._setup = () => {};
+  tv._startedAt = Date.now();
+  tv._lastActivityAt = Date.now();       // cycling normally, so not "silent"
+  tv._transportSince = Date.now() - 100; // ...but never handshook on this one
+  return tv;
+}
 
-  // A TV in standby resets the ws upgrade too, so this fallback fires on
-  // healthy hardware — it must not strand us on a port the TV may not serve.
-  tv.secure = true;
-  tv._restart({ resetTransport: true });
-  assert.strictEqual(tv.secure, false, 'unproven secure mode reverts to configured');
+test('WebosTv: an unproven transport is alternated by the watchdog', () => {
+  // The wss->ws direction has no fast path (ECONNRESET only fires while
+  // insecure), so a wrongly-ticked Secure box used to strand the node forever.
+  const tv = unprovenTv(true);
+  tv._checkStalled();
+  assert.strictEqual(tv.secure, false, 'wss that never handshakes falls back to ws');
 
-  // Once a handshake has completed on a transport, keep it.
-  tv.secure = true;
+  tv._transportSince = Date.now() - 100;
+  tv._checkStalled();
+  assert.strictEqual(tv.secure, true, 'and keeps alternating until one works');
+  tv.stop();
+});
+
+test('WebosTv: a proven transport is never alternated', () => {
+  const tv = unprovenTv(true);
+  tv._provenSecure = true; // a pairing handshake completed here
+  tv._checkStalled();
+  assert.strictEqual(tv.secure, true, 'a working transport is locked in for good');
+  tv.stop();
+});
+
+test('WebosTv: a stuck-but-proven client is rebuilt without changing transport', () => {
+  const tv = unprovenTv(true);
   tv._provenSecure = true;
-  tv._restart({ resetTransport: true });
-  assert.strictEqual(tv.secure, true, 'a proven transport survives a restart');
+  tv._lastActivityAt = Date.now() - 1000; // silent => stuck
+  let restarts = 0;
+  tv._restart = () => { restarts += 1; };
+
+  tv._checkStalled();
+  assert.strictEqual(restarts, 1, 'still rebuilds when wedged');
+  assert.strictEqual(tv.secure, true, 'but keeps the transport that works');
   tv.stop();
 });
 
@@ -473,13 +502,13 @@ test('WebosTv: an unproven ws->wss fallback is reverted on a watchdog restart', 
 // _restart() unconditionally reverted an unproven transport it undid that flip
 // immediately, looping forever on a port the TV refuses (caught live against a
 // real TV, which always RSTs plain ws and only serves wss).
-test('WebosTv: the ws->wss fallback restart does NOT undo its own flip', () => {
+test('WebosTv: _restart never changes transport on its own', () => {
   const tv = new WebosTv({ host: '127.0.0.1', name: 'fallback', secure: false });
   tv._teardownClient = () => {};
   tv._setup = () => {};
 
-  tv.secure = true;      // what the ECONNRESET handler just set
-  tv._restart();         // ...and how it applies it
+  tv._setTransport(true, 'connection reset'); // what the ECONNRESET handler does
+  tv._restart();                              // ...and how it applies it
   assert.strictEqual(tv.secure, true, 'the fallback flip survives its own restart');
   tv.stop();
 });
