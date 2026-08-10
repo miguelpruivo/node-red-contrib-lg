@@ -8,6 +8,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Dates are npm publish dates. Versions marked _(unreleased)_ exist in git but were never
 published to npm; their changes reached users in the following release.
 
+## [0.6.6] — 2026-08-10
+
+### Fixed
+
+- **ACs now recover on their own after an outage instead of staying dead for minutes or
+  hours.** LG signs every OAuth request with a timestamp that it validates against *its*
+  clock, and the window is tight — measured live, 30 minutes behind is already rejected by
+  the authorize step and 1 hour by the token endpoint (`Time of request execution
+  exceeded.` when the clock is behind, `Can't handle requests from the future.` when it is
+  ahead). A host that reboots after a power or network cut has a wrong clock — a Pi has no
+  RTC, and NTP cannot sync while the uplink is still down — so every poll failed until the
+  host clock happened to be fixed. The client now learns LG's clock from the `Date` header
+  of their responses and signs with that, so a skewed host clock no longer blocks
+  authentication at all. A large skew is reported once as a warning, since it is worth
+  fixing on the host too.
+- A rejected timestamp is no longer mistaken for a bad refresh token. It used to throw the
+  (perfectly good) token away and burn a five-request username/password login on **every
+  poll**, all of which failed at the very same signature check, against LG's rate-limited
+  login endpoints. The refresh token is now kept, and the recovery login is throttled to at
+  most one attempt every 5 minutes so it can never storm.
+- Authentication retries once immediately when LG rejects a timestamp, because the
+  rejecting response is itself what teaches the client LG's clock — so recovery happens
+  within the same poll rather than on some later one.
+
 ## [0.6.5] — 2026-08-07
 
 ### Changed

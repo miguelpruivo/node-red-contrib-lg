@@ -6,7 +6,7 @@ const assert = require('node:assert');
 const ac = require('../lib/thinq/ac');
 const wol = require('../lib/webos/wol');
 const { interpretPowerState, isPoweredOn, WebosTv } = require('../lib/webos/tv');
-const { ThinQClient, parseTokenPayload } = require('../lib/thinq/client');
+const { ThinQClient, parseTokenPayload, rfc2822 } = require('../lib/thinq/client');
 const { parseMessage, createCsr, generatePrivateKey } = require('../lib/thinq/mqtt');
 
 test('parseSnapshot reads temperature even when AC is off', () => {
@@ -285,6 +285,156 @@ test('refreshAccessToken still full-logins when LG actually rejects the token', 
 
   assert.strictEqual(await c.refreshAccessToken(), 'fresh');
   assert.strictEqual(logins, 1, 'an LG rejection is still self-healed by a fresh login');
+});
+
+// ---------------------------------------------------------------------------
+// Clock skew. Every LG OAuth request is signed together with an RFC-2822
+// timestamp that LG validates against THEIR clock; anything outside a few
+// minutes is rejected with "Time of request execution exceeded." (reproduced
+// live against the real API with a 30-minute skew). A host that reboots after
+// a power/network outage signs with a wrong clock — a Pi has no RTC, and NTP
+// cannot sync while the uplink is still down — so every poll fails until the
+// host clock is fixed, which is the reported "minutes or hours" of downtime.
+// The signing clock therefore has to come from LG, not from the host.
+// ---------------------------------------------------------------------------
+
+// A client whose HTTP layer answers every request with the given LG clock.
+function clientWithLgClock(lgNow, { fail = false } = {}) {
+  const c = new ThinQClient({});
+  c.http.defaults.adapter = async (config) => {
+    const response = { status: fail ? 400 : 200, data: {}, headers: { date: lgNow.toUTCString() }, config };
+    if (!fail) {
+      return response;
+    }
+    const err = new Error('Request failed with status code 400');
+    err.response = response;
+    throw err;
+  };
+  return c;
+}
+
+test('the signing clock is learned from LG response headers, not taken from the host', async () => {
+  const lgNow = new Date(Date.now() + 42 * 60 * 1000); // host clock 42 min behind
+  const c = clientWithLgClock(lgNow);
+
+  await c.http.get('https://example.invalid/');
+
+  const signed = Date.parse(rfc2822(c._now()));
+  assert.ok(
+    Math.abs(signed - lgNow.getTime()) < 5000,
+    `expected to sign with LG's clock (${lgNow.toUTCString()}), signed ${rfc2822(c._now())}`
+  );
+});
+
+// The response that rejects us carries LG's Date too, so a poll that starts
+// with a stale offset (the gateway lookup is cached, so it makes no request
+// that could refresh it) still learns the truth from its own failure.
+test('a rejected request also teaches the client LG clock', async () => {
+  const lgNow = new Date(Date.now() - 90 * 60 * 1000); // host clock 90 min ahead
+  const c = clientWithLgClock(lgNow, { fail: true });
+
+  await assert.rejects(() => c.http.get('https://example.invalid/'));
+
+  const signed = Date.parse(rfc2822(c._now()));
+  assert.ok(Math.abs(signed - lgNow.getTime()) < 5000, `signed ${rfc2822(c._now())}`);
+});
+
+// This is what turned a wrong clock into a request storm: the timestamp
+// rejection was read as "the refresh token might be bad", so every poll threw
+// the token away and burned a five-request username/password login that failed
+// at the same signature check — against LG's rate-limited login endpoints.
+test('refreshAccessToken does NOT full-login when LG rejects the signed timestamp', async () => {
+  const c = new ThinQClient({ username: 'u', password: 'p', refreshToken: 'rt' });
+  c._lgeapiAuthoritative = true; // skip the legacy region lookup
+  let logins = 0;
+  c.login = async () => { logins += 1; };
+  c.http = {
+    post: async () => {
+      const e = new Error('Request failed with status code 400');
+      e.response = { status: 400, data: { error: { message: 'Time of request execution exceeded.' } } };
+      throw e;
+    },
+  };
+
+  await assert.rejects(() => c.refreshAccessToken(), /Time of request execution exceeded/);
+  assert.strictEqual(logins, 0, 'a clock error is not a bad token: a full login fails identically');
+  assert.strictEqual(c.refreshToken, 'rt', 'a usable refresh token must not be discarded');
+});
+
+// A clock running *ahead* is rejected with a different message (measured live);
+// missing it would leave that host in the very storm this fix removes.
+test('a clock running ahead is recognised as skew too, not as a bad token', async () => {
+  const c = new ThinQClient({ username: 'u', password: 'p', refreshToken: 'rt' });
+  c._lgeapiAuthoritative = true;
+  let logins = 0;
+  c.login = async () => { logins += 1; };
+  c.http = {
+    post: async () => {
+      const e = new Error('Request failed with status code 400');
+      e.response = { status: 400, data: { error: { message: "Can't handle requests from the future." } } };
+      throw e;
+    },
+  };
+
+  await assert.rejects(() => c.refreshAccessToken(), /requests from the future/);
+  assert.strictEqual(logins, 0, 'still a clock problem, not a credentials problem');
+});
+
+test('ready() retries once with the corrected clock after LG rejects the timestamp', async () => {
+  const c = new ThinQClient({ username: 'u', password: 'p' });
+  c.getGateway = async () => ({}); // cached gateway: no request, so no fresh Date header
+  let attempts = 0;
+  c.login = async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      // The rejecting response is what teaches us LG's clock.
+      c._clockOffsetMs = 42 * 60 * 1000;
+      throw new Error('ThinQ OAuth authorize rejected: Time of request execution exceeded.');
+    }
+    c.refreshToken = 'rt';
+    c.accessToken = 'at';
+    c.expiresAt = Math.round(Date.now() / 1000) + 3600;
+  };
+  c.getUserNumber = async () => { c.userNumber = '42'; };
+
+  await c.ready();
+  assert.strictEqual(attempts, 2, 'recovered inside the same poll instead of waiting for the clock');
+});
+
+test('ready() gives up after one clock retry instead of looping', async () => {
+  const c = new ThinQClient({ username: 'u', password: 'p' });
+  c.getGateway = async () => ({});
+  let attempts = 0;
+  c.login = async () => {
+    attempts += 1;
+    c._clockOffsetMs = 42 * 60 * 1000;
+    throw new Error('ThinQ OAuth authorize rejected: Time of request execution exceeded.');
+  };
+
+  await assert.rejects(() => c.ready(), /Time of request execution exceeded/);
+  assert.strictEqual(attempts, 2, 'one retry, then report the failure to the poller');
+});
+
+// Defence in depth: whatever LG rejects a refresh with, the recovery attempt
+// must not become a per-poll password login against a rate-limited endpoint.
+test('the full-login fallback is throttled so it cannot storm LG', async () => {
+  const c = new ThinQClient({ username: 'u', password: 'p', refreshToken: 'rt' });
+  c._lgeapiAuthoritative = true;
+  let logins = 0;
+  c.login = async () => { logins += 1; throw new Error('ThinQ account login failed: nope'); };
+  c.http = {
+    post: async () => {
+      const e = new Error('Request failed with status code 400');
+      e.response = { status: 400, data: { error: { message: 'not exist refresh token' } } };
+      throw e;
+    },
+  };
+
+  for (let i = 0; i < 3; i++) {
+    c.refreshToken = 'rt'; // _doReady reloads it from the token store every poll
+    await assert.rejects(() => c.refreshAccessToken());
+  }
+  assert.strictEqual(logins, 1, 'one login attempt, not one per poll');
 });
 
 test('mqtt parseMessage extracts deviceId + reported delta', () => {

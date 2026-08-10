@@ -153,6 +153,35 @@ Gotchas (do not regress these):
   slowing each failed poll down and hammering LG's rate-limited login endpoints once per
   interval. It now rethrows when `err.response` is absent; the issue-#1 self-heal still runs for
   a genuine LG rejection.
+- **A wrong host clock breaks auth completely — so we sign with LG's clock, not the host's.**
+  Every OAuth request is signed with an RFC-2822 timestamp LG validates against *their* clock.
+  Measured live: **30 min behind is already rejected** by the authorize step and **1 h behind** by
+  the token endpoint, with two different messages — `Time of request execution exceeded.` (clock
+  behind) and `Can't handle requests from the future.` (clock ahead); `CLOCK_SKEW_RE` matches both,
+  and matching only the first would leave an ahead-running host broken. This is the user-reported
+  "after an outage the ACs take minutes or hours to come back": a host that reboots after a power
+  or network cut has a wrong clock (a Pi has no RTC, and NTP can't sync while the uplink is down),
+  so **every** poll failed until the clock happened to get fixed. `_trackLgClock` learns the offset
+  from the `Date` header of every LG response — success *and* error, because the rejecting response
+  carries it too — and `_now()`/`rfc2822(this._now())` sign with that. Deliberately **unclamped**
+  (a host booting without an RTC can be years out, which is exactly the case to fix) and applied
+  with no threshold; a skew > 60 s is warned about once. `expiresAt` uses `_nowSeconds()` so token
+  expiry math rides the same clock. Verified live: 3 days behind, 3 days ahead and 1 year behind
+  all authenticate and list devices. **Trap:** don't "simulate a wrong clock" in a test by patching
+  `Date.now` and expecting the *old* code to fail — `new Date()` doesn't go through `Date.now`, so
+  that patch is invisible to a bare `rfc2822()`. Patch `Date.prototype.toUTCString` to break the
+  old path, `Date.now` to exercise the new one. Both nodes and the MQTT path get this for free
+  (everything LG-facing goes through `client.http`; the Amazon CA fetch uses bare `axios`).
+- **A clock rejection is NOT a bad refresh token.** Treating it as one is what turned a skewed
+  clock into a storm: `refreshAccessToken` discarded the (good) token and burned a five-request
+  password login every poll, all failing at the same signature check. It now rethrows clock errors
+  (`isClockSkewError`), **keeps** the refresh token on a failed fallback login (so the next poll
+  retries the cheap refresh), and throttles the fallback login to one attempt per 5 min
+  (`FALLBACK_LOGIN_MIN_INTERVAL_MS`, timed on `monoMs()` — the wall clock is the very thing we
+  can't trust here). `_doReady` wraps `_readySequence` and retries **once** on a clock error, since
+  the rejecting response has just corrected the offset; recovery then lands in the same poll. The
+  no-token-at-all path (`_readySequence` → `login()`) is deliberately *not* throttled — it's only
+  reachable on first setup, where a login is the only option and speed matters.
 - LG errors must be surfaced with their `resultCode` (`describeLgError`), not the bare
   axios "status code 400". `resultCode 0103` is **transient** ("device busy / can't apply now",
   common for fan speed after a power/mode change or in auto-managed modes) — `sendCommand` retries
