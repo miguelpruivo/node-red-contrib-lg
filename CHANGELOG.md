@@ -8,6 +8,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Dates are npm publish dates. Versions marked _(unreleased)_ exist in git but were never
 published to npm; their changes reached users in the following release.
 
+## [0.7.0] — 2026-08-24
+
+### Added
+
+- **The TV node can now change picture settings**, so OLED Pixel Brightness and the
+  "Reduce Blue Light" toggle can be driven from a flow (day/night automations, for
+  example). With Action set to "From msg.payload":
+  `{ "brightness": 40 }` (0–100), `{ "reduceBlueLight": true }`,
+  `{ "pictureMode": "cinema" }`, or `{ "picture": { … } }` for any setting verbatim.
+  Several in one message are applied as a single write.
+- **Raw escape hatches** for anything not modelled: `{ "request": "ssap://…", "params": … }`
+  runs any SSAP call and returns its response as `msg.payload` (useful for reading settings
+  back), and `{ "luna": "luna://…", "params": … }` runs any luna service call.
+
+  LG refuses `ssap://settings/setSystemSettings` from third-party clients, so writes go the
+  way every other project does it: through a privileged system alert that carries the luna
+  call, which is then closed to fire it. Verified live on a 2022 set running webOS TV 7.0 —
+  LG's webOS 22+ permission hardening did not close this route. Requires webOS 4 or newer,
+  and the TV must be on. A brief alert may flash on screen.
+
 ## [0.6.6] — 2026-08-10
 
 ### Fixed

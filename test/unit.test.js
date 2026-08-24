@@ -773,3 +773,74 @@ test('ThinQClient refresh failure without stored credentials still surfaces the 
   };
   await assert.rejects(() => client.refreshAccessToken(), /not exist refresh token/);
 });
+
+// ---- Picture settings via the luna-over-alert route -------------------------
+
+test('WebosTv.lunaSend smuggles a luna:// call through a system alert, then closes it', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'luna' });
+  const calls = [];
+  tv.connected = true;
+  tv.request = async (uri, payload) => {
+    calls.push({ uri, payload });
+    return uri === 'ssap://system.notifications/createAlert'
+      ? { returnValue: true, alertId: 'ALERT_7' }
+      : { returnValue: true };
+  };
+
+  const params = { category: 'picture', settings: { backlight: 40 } };
+  const res = await tv.lunaSend('luna://com.webos.settingsservice/setSystemSettings', params);
+
+  assert.strictEqual(calls.length, 2, 'createAlert then closeAlert');
+  assert.strictEqual(calls[0].uri, 'ssap://system.notifications/createAlert');
+
+  const alert = calls[0].payload;
+  assert.strictEqual(alert.isSysReq, true, 'must be a system request to run privileged');
+  assert.strictEqual(alert.modal, false);
+  assert.strictEqual(alert.type, 'confirm');
+  assert.strictEqual(alert.buttons[0].onClick, 'luna://com.webos.settingsservice/setSystemSettings');
+  assert.deepStrictEqual(alert.buttons[0].params, params);
+  // Closing the alert is what actually fires the call, so onclose must carry it too.
+  assert.deepStrictEqual(alert.onclose, {
+    uri: 'luna://com.webos.settingsservice/setSystemSettings',
+    params,
+  });
+
+  assert.strictEqual(calls[1].uri, 'ssap://system.notifications/closeAlert');
+  assert.deepStrictEqual(calls[1].payload, { alertId: 'ALERT_7' });
+  assert.strictEqual(res.alertId, 'ALERT_7');
+});
+
+test('WebosTv.lunaSend fails loudly when the TV refuses the alert', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'luna' });
+  tv.connected = true;
+  tv.request = async () => ({ returnValue: false });
+  await assert.rejects(() => tv.lunaSend('luna://x/y', {}), /alertId/);
+});
+
+test('WebosTv.setPictureSettings targets the settings service picture category', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'pic' });
+  const sent = [];
+  tv.lunaSend = async (uri, params) => { sent.push({ uri, params }); return { alertId: 'A' }; };
+
+  await tv.setPictureSettings({ backlight: 55, pictureMode: 'cinema' });
+
+  assert.deepStrictEqual(sent, [{
+    uri: 'luna://com.webos.settingsservice/setSystemSettings',
+    params: { category: 'picture', settings: { backlight: 55, pictureMode: 'cinema' } },
+  }]);
+});
+
+test('WebosTv.getSystemSettings reads directly (no alert needed)', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'read' });
+  const calls = [];
+  tv.connected = true;
+  tv.request = async (uri, payload) => { calls.push({ uri, payload }); return { settings: { backlight: 80 } }; };
+
+  const res = await tv.getSystemSettings('picture', ['backlight']);
+
+  assert.deepStrictEqual(calls, [{
+    uri: 'ssap://settings/getSystemSettings',
+    payload: { category: 'picture', keys: ['backlight'] },
+  }]);
+  assert.deepStrictEqual(res.settings, { backlight: 80 });
+});

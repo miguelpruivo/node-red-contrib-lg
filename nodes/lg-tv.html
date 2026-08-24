@@ -89,10 +89,42 @@
 
   <h3>Input (commands)</h3>
   <dl class="message-properties">
-    <dt>payload<span class="property-type">bool | string</span></dt>
+    <dt>payload<span class="property-type">bool | string | object</span></dt>
     <dd>When Action is "From msg.payload": <code>true</code>/<code>"on"</code>,
         <code>false</code>/<code>"off"</code>, or <code>"toggle"</code>.</dd>
   </dl>
+
+  <h4>Picture settings</h4>
+  <p>Requires the TV to be <b>on</b>.</p>
+  <ul>
+    <li><code>{ "brightness": 40 }</code> &mdash; OLED Pixel Brightness (0&ndash;100).</li>
+    <li><code>{ "reduceBlueLight": true }</code> &mdash; the "Reduce Blue Light" toggle.</li>
+    <li><code>{ "pictureMode": "cinema" }</code> &mdash; picture preset.</li>
+    <li><code>{ "picture": { "backlight": 40, "eyeComfortMode": "on" } }</code> &mdash;
+        any picture setting, verbatim.</li>
+  </ul>
+  <p>Several can be combined in one message &mdash;
+  <code>{ "brightness": 90, "reduceBlueLight": false }</code> is applied as a single write.
+  Keys inside <code>picture</code> override the shorthands above.</p>
+  <p>Brightness is stored <b>per picture preset</b> (and separately for SDR/HDR), so set
+  <code>pictureMode</code> in the same message when it has to be deterministic. Energy
+  Saving can clamp or override the value. Note that the picture category's own
+  <code>brightness</code> key is Black Level, not the panel light &mdash; that is why
+  <code>{ "brightness": n }</code> maps to <code>backlight</code>.</p>
+
+  <h4>Raw escape hatches</h4>
+  <ul>
+    <li><code>{ "request": "ssap://settings/getSystemSettings",
+        "params": { "category": "picture", "keys": ["backlight"] } }</code> &mdash;
+        any SSAP call; the response becomes <code>msg.payload</code>.</li>
+    <li><code>{ "luna": "luna://com.webos.settingsservice/setSystemSettings",
+        "params": { "category": "picture", "settings": { "backlight": 40 } } }</code> &mdash;
+        any luna service call.</li>
+  </ul>
+  <p>Settings writes have to go through <code>luna</code>: LG refuses
+  <code>ssap://settings/setSystemSettings</code> from third-party clients, so the node
+  smuggles the call through a system alert. A brief alert may flash on screen.
+  Needs webOS 4 or newer.</p>
 
   <h3>Output (status)</h3>
   <dl class="message-properties">

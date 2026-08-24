@@ -340,6 +340,39 @@ remote, the LG app) emit instantly instead of waiting for a poll.
   window of failed attempts has elapsed with no state yet.
 - First connection needs a one-time **pairing prompt** accepted on the TV; the key is saved
   to `webos-<id>.key`.
+- **Settings writes need the luna-over-alert route; plain SSAP is refused.** lgtv2's pairing
+  payload already asks for `WRITE_SETTINGS` (and `WRITE_NOTIFICATION_ALERT`, `READ_SETTINGS`),
+  and `ssap://settings/getSystemSettings` reads fine — but LG refuses
+  `ssap://settings/setSystemSettings` from third-party clients ("no such service or method").
+  Every project that does this (homebridge-webos-tv, bscpylgtv, the HA scripts) uses the same
+  workaround, now in `WebosTv.lunaSend`: open a **system** alert
+  (`ssap://system.notifications/createAlert`, **`isSysReq: true`** — without it nothing happens)
+  whose button `onClick` *and* `onclose`/`onfail` carry the `luna://` URI + params, then
+  `ssap://system.notifications/closeAlert` with the returned `alertId`. **Closing** the alert is
+  what fires the call, which is why the action is repeated in `onclose` rather than only on the
+  button. webOS < 4 doesn't run it from closeAlert (needs the alert opened twice plus an `ENTER`
+  on the remote-input socket) — deliberately unsupported. The alert may flash on screen.
+  OLED Pixel Brightness is the key **`backlight`** (0-100) in the `picture`
+  category — the same category's `brightness` is **Black Level**, not the panel light, so
+  `lg-ac`-style sugar `{ brightness: n }` maps to `backlight` (`PICTURE_KEY_BRIGHTNESS`).
+  Values are per picture preset *and* per SDR/HDR, so pin `pictureMode` in the same call for
+  determinism; Energy Saving can clamp them (`energySaving` reads `off` on the test set).
+  **Verified live** on `HE_DTV_W22O_AFABATPU` / **webOS TV 7.0** (2022, firmware 33.31.68):
+  backlight driven 20 → 90 → 20 with the panel following, and the read-back confirming each
+  write. So LG's webOS 22+ notification-manager hardening did *not* close this route for the
+  settings service. **`oledLight`, `oled_light` and `panelBrightness` do NOT exist** — the TV
+  rejects the *whole* `getSystemSettings` request if any single key is unknown ("Some keys are
+  not allowed for the request"), so probe candidate keys **one at a time**; `keys` is mandatory
+  (a bare `category` is refused). Allowed picture keys found: `backlight`, `brightness`,
+  `contrast`, `color`, `pictureMode`, `energySaving`, `peakBrightness`, `dynamicContrast`,
+  `sharpness`, `eyeComfortMode`, `colorTemperature`.
+- **"Reduce Blue Light" is `eyeComfortMode`** (picture category, string `'on'`/`'off'`), exposed
+  as `{ reduceBlueLight: true|false }`. Independent of `colorTemperature` — toggling it left
+  `colorTemperature` at -50 untouched, so the warm shift it applies is layered on top rather
+  than being a colour-temperature write. Verified live (on → off → on).
+- **The test TV only serves `wss://:3001`.** Plain `ws://:3000` gets a socket hang-up on the
+  upgrade — not the documented `ECONNRESET`, so the *fast* transport fallback does not fire and
+  only the watchdog's ws↔wss alternation rescues it (~30 s). Tick **Secure** for this TV.
 - **Reference point:** `hobbyquaker/node-red-contrib-lgtv` (by the lgtv2 author) reports off
   **immediately on socket `close`**, with no power-state subscription and no grace period. That
   is why it felt instant — and why it flaps on every Wi-Fi hiccup. Our grace timer is the

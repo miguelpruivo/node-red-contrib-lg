@@ -471,3 +471,51 @@ test('lg-account poller emits AC snapshots (live)', { skip: !process.env.LG_USER
   assert.ok('currentTemperature' in got.parsed, 'reports current temperature');
   node.emit('close', () => {});
 });
+
+test('lg-tv deriveCommand routes picture/raw payloads and still derives power', () => {
+  const mod = require('../nodes/lg-tv.js');
+  const d = mod._deriveCommand;
+
+  assert.deepStrictEqual(d({ brightness: 40 }), { type: 'picture', settings: { backlight: 40 } });
+  assert.deepStrictEqual(d({ brightness: 0 }), { type: 'picture', settings: { backlight: 0 } });
+  assert.deepStrictEqual(
+    d({ picture: { backlight: 10, pictureMode: 'cinema' } }),
+    { type: 'picture', settings: { backlight: 10, pictureMode: 'cinema' } },
+  );
+  assert.deepStrictEqual(d({ reduceBlueLight: true }), { type: 'picture', settings: { eyeComfortMode: 'on' } });
+  assert.deepStrictEqual(d({ reduceBlueLight: false }), { type: 'picture', settings: { eyeComfortMode: 'off' } });
+
+  // several picture settings in one message are merged, not silently dropped
+  assert.deepStrictEqual(
+    d({ brightness: 90, reduceBlueLight: false, pictureMode: 'cinema' }),
+    { type: 'picture', settings: { backlight: 90, eyeComfortMode: 'off', pictureMode: 'cinema' } },
+  );
+  // an explicit `picture` object wins over the sugar
+  assert.deepStrictEqual(
+    d({ brightness: 90, picture: { backlight: 5 } }),
+    { type: 'picture', settings: { backlight: 5 } },
+  );
+  assert.deepStrictEqual(
+    d({ request: 'ssap://settings/getSystemSettings', params: { category: 'picture' } }),
+    { type: 'request', uri: 'ssap://settings/getSystemSettings', params: { category: 'picture' } },
+  );
+  assert.deepStrictEqual(
+    d({ luna: 'luna://com.webos.settingsservice/setSystemSettings', params: { category: 'time' } }),
+    { type: 'luna', uri: 'luna://com.webos.settingsservice/setSystemSettings', params: { category: 'time' } },
+  );
+
+  // power payloads keep working, unchanged
+  assert.deepStrictEqual(d('on'), { type: 'power', action: 'on' });
+  assert.deepStrictEqual(d(false), { type: 'power', action: 'off' });
+  assert.deepStrictEqual(d({ power: true }), { type: 'power', action: 'on' });
+
+  // brightness is validated: 0-100 only
+  assert.throws(() => d({ brightness: 101 }), /0-100/);
+  assert.throws(() => d({ brightness: -1 }), /0-100/);
+  assert.throws(() => d({ brightness: 'bright' }), /0-100/);
+  assert.throws(() => d({ picture: 'cinema' }), /object/);
+  assert.throws(() => d({ reduceBlueLight: 'yes' }), /true or false/);
+  assert.throws(() => d({ pictureMode: 42 }), /pictureMode/);
+  assert.throws(() => d({ request: 123 }), /ssap:\/\//);
+  assert.throws(() => d({ luna: 'ssap://nope' }), /luna:\/\//);
+});
