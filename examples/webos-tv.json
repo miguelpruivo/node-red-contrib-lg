@@ -4,14 +4,18 @@
     "type": "tab",
     "label": "LG webOS TV example",
     "disabled": false,
-    "info": "Example flow for controlling and monitoring an LG webOS TV with a single lg-tv node.\n\n1. Open the lg-tv node and enter the TV's IP and MAC address.\n2. On the TV, enable Settings -> General -> Mobile TV On so Wake-on-LAN works.\n3. Deploy. The first time, accept the pairing prompt on the TV screen.\n\nThe lg-tv node accepts on/off/toggle on its input and emits the TV power state on its output whenever it changes."
+    "info": "Example flow for controlling and monitoring an LG webOS TV with a single lg-tv node.\n\n1. Open the lg-tv node and enter the TV's IP and MAC address.\n2. On the TV, enable Settings -> General -> Mobile TV On so Wake-on-LAN works.\n3. Deploy. The first time, accept the pairing prompt on the TV screen.\n\nThe lg-tv node accepts on/off/toggle on its input and emits the TV power state on its output whenever it changes.\n\nPicture settings\n----------------\nThe two scheduled injects switch the panel between a bright daytime look and a dim, warm night-time one (OLED Pixel Brightness plus the Reduce Blue Light toggle). Adjust the times in each inject's Repeat setting.\n\nThese only apply while the TV is ON -- a write that lands while it is off fails, which shows up on the node's status and in the debug sidebar. Brightness is stored per picture preset and separately for SDR/HDR, so add \"pictureMode\" to the payload if the result has to be deterministic.\n\nThe last inject reads the current values back with the raw ssap:// escape hatch."
   },
   {
     "id": "inj-tv-on",
     "type": "inject",
     "z": "flow-webos-example",
     "name": "Turn ON",
-    "props": [{ "p": "payload" }],
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
     "repeat": "",
     "crontab": "",
     "once": false,
@@ -21,14 +25,22 @@
     "payloadType": "str",
     "x": 150,
     "y": 120,
-    "wires": [["tv-node"]]
+    "wires": [
+      [
+        "tv-node"
+      ]
+    ]
   },
   {
     "id": "inj-tv-off",
     "type": "inject",
     "z": "flow-webos-example",
     "name": "Turn OFF",
-    "props": [{ "p": "payload" }],
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
     "repeat": "",
     "crontab": "",
     "once": false,
@@ -38,14 +50,22 @@
     "payloadType": "str",
     "x": 150,
     "y": 180,
-    "wires": [["tv-node"]]
+    "wires": [
+      [
+        "tv-node"
+      ]
+    ]
   },
   {
     "id": "inj-tv-toggle",
     "type": "inject",
     "z": "flow-webos-example",
     "name": "Toggle",
-    "props": [{ "p": "payload" }],
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
     "repeat": "",
     "crontab": "",
     "once": false,
@@ -55,7 +75,86 @@
     "payloadType": "str",
     "x": 150,
     "y": 240,
-    "wires": [["tv-node"]]
+    "wires": [
+      [
+        "tv-node"
+      ]
+    ]
+  },
+  {
+    "id": "inj-tv-day",
+    "type": "inject",
+    "z": "flow-webos-example",
+    "name": "Day look (08:00)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "00 08 * * *",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"brightness\":90,\"reduceBlueLight\":false}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 320,
+    "wires": [
+      [
+        "tv-node"
+      ]
+    ]
+  },
+  {
+    "id": "inj-tv-night",
+    "type": "inject",
+    "z": "flow-webos-example",
+    "name": "Night look (21:00)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "00 21 * * *",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"brightness\":25,\"reduceBlueLight\":true}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 380,
+    "wires": [
+      [
+        "tv-node"
+      ]
+    ]
+  },
+  {
+    "id": "inj-tv-read",
+    "type": "inject",
+    "z": "flow-webos-example",
+    "name": "Read picture settings",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"request\":\"ssap://settings/getSystemSettings\",\"params\":{\"category\":\"picture\",\"keys\":[\"backlight\",\"eyeComfortMode\",\"pictureMode\"]}}",
+    "payloadType": "json",
+    "x": 170,
+    "y": 440,
+    "wires": [
+      [
+        "tv-node"
+      ]
+    ]
   },
   {
     "id": "tv-node",
@@ -70,8 +169,12 @@
     "action": "msg",
     "emitInitial": true,
     "x": 400,
-    "y": 180,
-    "wires": [["dbg-tv"]]
+    "y": 280,
+    "wires": [
+      [
+        "dbg-tv"
+      ]
+    ]
   },
   {
     "id": "dbg-tv",
@@ -85,7 +188,7 @@
     "complete": "payload",
     "targetType": "msg",
     "x": 630,
-    "y": 180,
+    "y": 280,
     "wires": []
   }
 ]

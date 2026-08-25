@@ -8,6 +8,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Dates are npm publish dates. Versions marked _(unreleased)_ exist in git but were never
 published to npm; their changes reached users in the following release.
 
+## [0.7.1] — 2026-08-25
+
+### Documentation
+
+- The README still described the TV node as power-only ("Volume, inputs and app launch are
+  not exposed") — 0.7.0 documented the new picture-settings commands only in the editor help
+  panel. The command reference now covers `brightness` / `reduceBlueLight` / `pictureMode` /
+  `picture`, the `request` and `luna` escape hatches, the per-preset and SDR/HDR caveats, and
+  the output shapes each command returns.
+- The webOS example flow gained scheduled day/night picture-settings injects and a read-back
+  inject using the raw `ssap://` route.
+
 ## [0.7.0] — 2026-08-24
 
 ### Added

@@ -6,7 +6,8 @@ Node-RED nodes to **control and monitor LG ThinQ air conditioners** and **LG web
   (turn on/off, set mode / temperature / fan).
 - 🌡️ **AC status** — temperature, power, mode, etc. are emitted on a schedule **even when the AC
   is off**, plus **real-time push** so changes made on the AC itself (its remote, the LG app) emit instantly.
-- 📺 **TVs (LG webOS)** — one `lg-tv` node: turn on (Wake-on-LAN) / off / toggle in, on/off events out.
+- 📺 **TVs (LG webOS)** — one `lg-tv` node: turn on (Wake-on-LAN) / off / toggle, plus
+  **picture settings** (OLED Pixel Brightness, Reduce Blue Light, picture preset); on/off events out.
 - 🔑 **Automatic auth** — log in once with your LG account; the refresh token is extracted and saved for reuse.
 
 > Unofficial project. Not affiliated with or endorsed by LG. Use at your own risk.
@@ -36,7 +37,7 @@ Requires Node.js 18+ and Node-RED 3.0+.
 |------|------|---------|
 | `lg-account` | config | LG ThinQ account + shared device poller |
 | `lg-ac` | in + out | Control an AC **and** emit its state (after commands and on every poll) |
-| `lg-tv` | in + out | Control a webOS TV (on/off/toggle) **and** emit on/off events |
+| `lg-tv` | in + out | Control a webOS TV (on/off/toggle + picture settings) **and** emit on/off events |
 
 Each device is a single node: wire your commands into its input, and wire its output to read
 state. There are ready-made example flows under
@@ -162,6 +163,9 @@ The pairing key is then stored at `<userDir>/node-red-contrib-lg/webos-<nodeId>.
 ### 2. Use it
 
 **Input — commands**: with Action set to `From msg.payload`, send `"on"`, `"off"`, or `"toggle"`.
+An object payload changes **picture settings** instead — `{ "brightness": 40 }` (OLED Pixel
+Brightness, 0–100), `{ "reduceBlueLight": true }`, `{ "pictureMode": "cinema" }`. The TV has to be
+on for those. See the [command reference](#tv--lg-tv) for the full set.
 
 **Output — state** is emitted whenever the TV turns on or off (and after a command):
 
@@ -254,7 +258,7 @@ Example: `{ "power": true, "mode": "COOL", "temperature": 22, "fan": "HIGH", "ve
 Set the node's **Action** to `From msg.payload` (default) and send a command, or hard-wire the
 Action to `on` / `off` / `toggle` (then the payload is ignored).
 
-**Input `msg.payload`**
+**Input `msg.payload`** — power:
 
 | `msg.payload` | Effect |
 |---|---|
@@ -263,14 +267,42 @@ Action to `on` / `off` / `toggle` (then the payload is ignored).
 | `"toggle"` | Toggle on/off |
 | `{ "power": true }` / `{ "power": false }` | On / off |
 
-> The TV node currently controls **power only** (on / off / toggle). Volume, inputs and app launch
-> are not exposed.
+**Input `msg.payload`** — picture settings (the TV has to be **on**):
+
+| `msg.payload` | Effect |
+|---|---|
+| `{ "brightness": 40 }` | OLED Pixel Brightness, `0`–`100` (the `backlight` setting) |
+| `{ "reduceBlueLight": true }` | the TV's "Reduce Blue Light" toggle (`eyeComfortMode`) |
+| `{ "pictureMode": "cinema" }` | picture preset |
+| `{ "picture": { "backlight": 40, "contrast": 80 } }` | any picture setting, verbatim |
+
+Several can be combined in one message — `{ "brightness": 90, "reduceBlueLight": false }` is
+applied as a single write. Keys inside `picture` override the shorthands above. Other picture keys
+the TV accepts: `brightness` (Black Level), `contrast`, `color`, `sharpness`, `colorTemperature`,
+`energySaving`, `peakBrightness`, `dynamicContrast`.
+
+> Brightness is stored **per picture preset**, and separately for SDR and HDR — pass `pictureMode`
+> in the same message when the result has to be deterministic. Energy Saving can clamp or override
+> it. The picture category's own `brightness` key is **Black Level**, not the panel light, which is
+> why `{ "brightness": n }` maps to `backlight`.
+
+**Input `msg.payload`** — raw escape hatches:
+
+| `msg.payload` | Effect |
+|---|---|
+| `{ "request": "ssap://…", "params": { … } }` | any SSAP call; the response becomes `msg.payload` |
+| `{ "luna": "luna://…", "params": { … } }` | any luna service call |
+
+Settings writes have to take the `luna` route: LG refuses `ssap://settings/setSystemSettings` from
+third-party clients, so the node smuggles the call through a system alert (which may flash briefly
+on screen). Needs webOS 4 or newer. Volume, inputs and app launch have no shorthand — use
+`request` for those.
 
 **Output `msg`** (emitted whenever the TV turns on/off and after a command):
 
 | Field | Description |
 |---|---|
-| `payload` | `{ power: boolean, state: string, connected: boolean }` (`state` is the webOS label, e.g. `On`, `Off`) |
+| `payload` | status change / power command: `{ power: boolean, state: string, connected: boolean }` (`state` is the webOS label, e.g. `On`, `Off`) · picture settings: `{ ok: true, settings: { … } }` · `luna`: `{ ok: true, … }` · `request`: the raw SSAP response |
 | `event` | `on` / `off` (status change) or `command` (after a control) |
 | `topic` | the TV name |
 
@@ -289,6 +321,8 @@ Action to `on` / `off` / `toggle` (then the payload is ignored).
   it for periodic temperature and as a fallback if MQTT is unavailable.
 - **webOS** uses the local WebSocket protocol (via [`lgtv2`](https://www.npmjs.com/package/lgtv2))
   for control and power-state subscription, and a built-in **Wake-on-LAN** magic packet to power on.
+  Picture settings go through `luna://com.webos.settingsservice/setSystemSettings`, carried by a
+  system alert because LG blocks the plain SSAP setter for third-party clients.
 
 The poller and the MQTT connection are shared by all `lg-ac` nodes on the same account.
 
@@ -299,6 +333,8 @@ The poller and the MQTT connection are shared by all `lg-ac` nodes on the same a
 - This relies on LG's cloud for ThinQ; if LG changes the API it may need updating.
 - Supported AC fan-speed values and modes vary by model; you can always pass a raw numeric value.
 - TV power-on requires Wake-on-LAN to be enabled on the TV and a reachable broadcast address.
+- TV picture settings need the TV **on** and webOS 4 or newer; the alert used to carry the write
+  may flash briefly on screen. Which keys and values are accepted varies by model.
 - ThinQ "v1" (older) devices are not specifically handled; this targets ThinQ v2 ACs.
 
 ## Development
