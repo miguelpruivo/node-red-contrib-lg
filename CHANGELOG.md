@@ -8,7 +8,29 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Dates are npm publish dates. Versions marked _(unreleased)_ exist in git but were never
 published to npm; their changes reached users in the following release.
 
-## [0.7.1] — 2026-08-25
+## [0.7.2] — 2026-08-26
+
+### Added
+
+- **A picture-settings write is now read straight back**, and `msg.payload.actual` reports what
+  the TV actually holds (`null` if the read-back failed) instead of only echoing the request.
+  A difference between the two is logged as a warning. A settings write leaves through an alert
+  the TV closes by itself, so until now a clamped or misrouted value was indistinguishable from
+  a successful one — Energy Saving can clamp the panel light, and values are stored per picture
+  preset and separately for SDR/HDR, so a write can land in a slot other than the one being
+  watched.
+
+### Notes
+
+- Investigated a report of `{ reduceBlueLight, brightness }` in one message leaving OLED Pixel
+  Brightness at 0. **Not reproducible**: verified live on `HE_DTV_W22O_AFABATPU` / webOS TV 7.0
+  that the combined write applies exactly as sent in both directions, that sequencing the mode
+  before the value behaves identically, and that even three deliberately overlapping writes
+  apply cleanly (last one wins) with nothing garbled. The TV was found already at `backlight: 0`
+  before any test ran, so the 0 came from outside this code path — hence the read-back above,
+  which makes the next occurrence attributable.
+
+## [0.7.1] — 2026-08-25 _(unreleased)_
 
 ### Documentation
 

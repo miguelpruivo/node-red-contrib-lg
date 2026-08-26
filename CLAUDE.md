@@ -366,6 +366,20 @@ remote, the LG app) emit instantly instead of waiting for a poll.
   (a bare `category` is refused). Allowed picture keys found: `backlight`, `brightness`,
   `contrast`, `color`, `pictureMode`, `energySaving`, `peakBrightness`, `dynamicContrast`,
   `sharpness`, `eyeComfortMode`, `colorTemperature`.
+- **A combined picture write is fine — and a settings write is read back now.** A report of
+  `{reduceBlueLight, brightness}` in one message leaving `backlight` at 0 did **not** reproduce
+  (verified live, webOS TV 7.0): `{backlight:30, eyeComfortMode:'on'}` and the `off`/`80` direction
+  both read back exactly as sent, mode-then-value sequencing behaves identically, and three
+  deliberately **overlapping** `setPictureSettings` calls all applied with last-write-wins and no
+  garbling — so the alert route tolerates concurrency and needs no per-TV lock (unlike `lg-ac`'s
+  `withDeviceLock`, which exists for a different reason: the AC *rejects* overlapping commands).
+  The TV was already at `backlight: 0` when the investigation started, so the 0 came from outside
+  this code path. Because a write leaves through an alert the TV closes itself, a clamped or
+  misrouted value is indistinguishable from success — so `lg-tv` now calls
+  `readBackPictureSettings` after every picture write and reports `msg.payload.actual`, warning
+  when it differs from what was asked (`warnOnMismatch`). Read-back is best-effort: a raw `picture`
+  key the TV refuses to read makes `getSystemSettings` reject the whole request, which must never
+  turn a successful write into a failed message.
 - **"Reduce Blue Light" is `eyeComfortMode`** (picture category, string `'on'`/`'off'`), exposed
   as `{ reduceBlueLight: true|false }`. Independent of `colorTemperature` — toggling it left
   `colorTemperature` at -50 untouched, so the warm shift it applies is layered on top rather

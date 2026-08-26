@@ -286,6 +286,11 @@ the TV accepts: `brightness` (Black Level), `contrast`, `color`, `sharpness`, `c
 > it. The picture category's own `brightness` key is **Black Level**, not the panel light, which is
 > why `{ "brightness": n }` maps to `backlight`.
 
+After a picture-settings write the node reads the same keys straight back, so `msg.payload.actual`
+is what the TV really holds (`null` if the read-back itself failed) rather than an echo of the
+request. When the two differ the node logs a warning — which is how you catch a value that was
+clamped or landed in a different preset / SDR-HDR slot.
+
 **Input `msg.payload`** — raw escape hatches:
 
 | `msg.payload` | Effect |
@@ -302,7 +307,7 @@ on screen). Needs webOS 4 or newer. Volume, inputs and app launch have no shorth
 
 | Field | Description |
 |---|---|
-| `payload` | status change / power command: `{ power: boolean, state: string, connected: boolean }` (`state` is the webOS label, e.g. `On`, `Off`) · picture settings: `{ ok: true, settings: { … } }` · `luna`: `{ ok: true, … }` · `request`: the raw SSAP response |
+| `payload` | status change / power command: `{ power: boolean, state: string, connected: boolean }` (`state` is the webOS label, e.g. `On`, `Off`) · picture settings: `{ ok: true, settings: { … }, actual: { … } }` · `luna`: `{ ok: true, … }` · `request`: the raw SSAP response |
 | `event` | `on` / `off` (status change) or `command` (after a control) |
 | `topic` | the TV name |
 

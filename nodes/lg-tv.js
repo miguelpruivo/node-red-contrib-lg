@@ -90,6 +90,39 @@ function deriveCommand(payload) {
   return { type: 'power', action: deriveAction(payload) };
 }
 
+// A settings write goes out through an alert the TV closes on its own, so a
+// silently ignored or clamped value looks identical to a successful one. Read
+// the keys back (a plain SSAP read, no alert needed) so the output message
+// carries what the TV actually holds rather than an echo of the request. This
+// is the only way to attribute a value that "changed by itself" -- Energy
+// Saving can clamp the panel light, and values are stored per picture preset
+// and separately for SDR/HDR, so a write can land in a slot other than the one
+// being watched.
+async function readBackPictureSettings(node, settings) {
+  try {
+    const res = await node.tv.getSystemSettings('picture', Object.keys(settings));
+    return (res && res.settings) || null;
+  } catch (err) {
+    // Best-effort: a raw `picture` payload may carry a key the TV refuses to
+    // read back, which must not turn a successful write into a failed message.
+    node.debug(`Could not read picture settings back: ${err.message}`);
+    return null;
+  }
+}
+
+function warnOnMismatch(node, requested, actual) {
+  if (!actual) {
+    return;
+  }
+  const differing = Object.keys(requested).filter(
+    (key) => key in actual && String(actual[key]) !== String(requested[key]),
+  );
+  if (differing.length) {
+    const detail = differing.map((k) => `${k}: asked ${requested[k]}, got ${actual[k]}`).join('; ');
+    node.warn(`TV did not apply the picture settings as sent (${detail})`);
+  }
+}
+
 module.exports = function (RED) {
   function LgTvNode(config) {
     RED.nodes.createNode(this, config);
@@ -186,7 +219,9 @@ module.exports = function (RED) {
           node.status({ fill: 'blue', shape: 'dot', text: command.type + '...' });
           if (command.type === 'picture') {
             await node.tv.setPictureSettings(command.settings);
-            msg.payload = { ok: true, settings: command.settings };
+            const actual = await readBackPictureSettings(node, command.settings);
+            msg.payload = { ok: true, settings: command.settings, actual };
+            warnOnMismatch(node, command.settings, actual);
           } else if (command.type === 'luna') {
             msg.payload = { ok: true, ...(await node.tv.lunaSend(command.uri, command.params)) };
           } else {
@@ -221,3 +256,5 @@ module.exports = function (RED) {
 
 module.exports._deriveAction = deriveAction;
 module.exports._deriveCommand = deriveCommand;
+module.exports._readBackPictureSettings = readBackPictureSettings;
+module.exports._warnOnMismatch = warnOnMismatch;

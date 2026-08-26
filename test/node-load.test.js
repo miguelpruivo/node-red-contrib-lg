@@ -519,3 +519,57 @@ test('lg-tv deriveCommand routes picture/raw payloads and still derives power', 
   assert.throws(() => d({ request: 123 }), /ssap:\/\//);
   assert.throws(() => d({ luna: 'ssap://nope' }), /luna:\/\//);
 });
+
+test('lg-tv reads picture settings back and reports what the TV actually holds', async () => {
+  const { _readBackPictureSettings } = require('../nodes/lg-tv.js');
+  const calls = [];
+  const node = {
+    debug: (m) => calls.push(m),
+    tv: {
+      getSystemSettings: (category, keys) => {
+        calls.push(`${category}:${keys.join(',')}`);
+        return Promise.resolve({ settings: { backlight: 30, eyeComfortMode: 'on' } });
+      },
+    },
+  };
+
+  const actual = await _readBackPictureSettings(node, { backlight: 30, eyeComfortMode: 'on' });
+  assert.deepStrictEqual(actual, { backlight: 30, eyeComfortMode: 'on' });
+  // Only the keys that were written are read back.
+  assert.deepStrictEqual(calls, ['picture:backlight,eyeComfortMode']);
+});
+
+test('lg-tv read-back failure never fails the write', async () => {
+  const { _readBackPictureSettings } = require('../nodes/lg-tv.js');
+  const logged = [];
+  const node = {
+    debug: (m) => logged.push(m),
+    // A raw `picture` payload can carry a key the TV refuses to read back; the
+    // whole getSystemSettings request is then rejected.
+    tv: { getSystemSettings: () => Promise.reject(new Error('Some keys are not allowed for the request')) },
+  };
+
+  assert.strictEqual(await _readBackPictureSettings(node, { madeUpKey: 1 }), null);
+  assert.strictEqual(logged.length, 1);
+  assert.match(logged[0], /Some keys are not allowed/);
+});
+
+test('lg-tv warns when the TV did not apply a picture setting as sent', () => {
+  const { _warnOnMismatch } = require('../nodes/lg-tv.js');
+  const warnings = [];
+  const node = { warn: (m) => warnings.push(m) };
+
+  // The reported case: asked for 30, TV holds 0.
+  _warnOnMismatch(node, { backlight: 30 }, { backlight: 0 });
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0], /backlight: asked 30, got 0/);
+
+  // Applied faithfully -> silence.
+  _warnOnMismatch(node, { backlight: 30, eyeComfortMode: 'on' }, { backlight: 30, eyeComfortMode: 'on' });
+  // A TV that reports a number as a string is not a mismatch.
+  _warnOnMismatch(node, { backlight: 30 }, { backlight: '30' });
+  // No read-back, and keys the TV does not report, say nothing either way.
+  _warnOnMismatch(node, { backlight: 30 }, null);
+  _warnOnMismatch(node, { backlight: 30 }, { pictureMode: 'expert2' });
+  assert.strictEqual(warnings.length, 1);
+});

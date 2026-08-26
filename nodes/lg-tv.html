@@ -131,6 +131,12 @@
     <dt>payload<span class="property-type">object</span></dt>
     <dd><code>{ power: boolean, state: string, connected: boolean }</code>.
         <code>state</code> is the detailed webOS label (e.g. <code>On</code>, <code>Off</code>).</dd>
+    <dd>After a picture-settings command:
+        <code>{ ok: true, settings: { &hellip; }, actual: { &hellip; } }</code> &mdash;
+        <code>settings</code> is what was sent, <code>actual</code> is what the TV holds
+        when read straight back (<code>null</code> if the read-back failed). If the two
+        differ the node also logs a warning: a write can be clamped (Energy Saving) or land
+        in another preset / SDR-HDR slot, and without the read-back that is invisible.</dd>
     <dt>event<span class="property-type">string</span></dt>
     <dd><code>on</code> / <code>off</code> (status change) or <code>command</code> (after a control).</dd>
     <dt>topic<span class="property-type">string</span></dt>
