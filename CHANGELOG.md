@@ -8,6 +8,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Dates are npm publish dates. Versions marked _(unreleased)_ exist in git but were never
 published to npm; their changes reached users in the following release.
 
+## [0.7.3] — 2026-09-05
+
+### Changed
+
+- **The notification a TV picture write puts on screen now says what it is doing, in the TV's own
+  menu language, and stays up for about 2 seconds.** It used to be blank: a settings write can only
+  leave as a system notification whose action carries the `luna://` call, so one always appeared,
+  carrying `message: ' '` in the hope of being invisible — which it is not on every model. It now
+  reads `Reduce Blue Light on`, `Reduzir a luz azul ligado`, `OLED Pixel Brightness 30%` and so on,
+  using LG's own menu wording so the viewer can find the same toggle on the TV. Settings changed
+  in the same message are piped into one line — `Reduzir a luz azul ligado | Brilho dos píxeis
+  OLED 70%`.
+- The menu language is read once from `localeInfo` and cached until the TV reconnects. Copy ships
+  for en, pt, es, fr, de, it, nl, pl, sv, da, nb, fi, tr and ru; anything else falls back to
+  English, as does a TV that will not report its locale — the read is best-effort and can never
+  turn a working write into a failed one.
+- **A picture setting now takes effect ~2 s after the message**, because closing the notification is
+  what executes the write, so holding it on screen holds the write. The output message follows it.
+  Sending two settings as two simultaneous messages produces two writes and two notifications; put
+  them in a single message instead.
+
 ## [0.7.2] — 2026-08-26
 
 ### Added

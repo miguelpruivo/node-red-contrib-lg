@@ -111,6 +111,14 @@
   Saving can clamp or override the value. Note that the picture category's own
   <code>brightness</code> key is Black Level, not the panel light &mdash; that is why
   <code>{ "brightness": n }</code> maps to <code>backlight</code>.</p>
+  <p>A picture write puts a notification on the TV for about <b>2 seconds</b> naming what
+  changed, in the TV's menu language &mdash; <code>Reduce Blue Light on</code>,
+  <code>OLED Pixel Brightness 30%</code>, or both piped together when one message changes
+  both: <code>Reduzir a luz azul ligado | Brilho dos píxeis OLED 70%</code>. It cannot
+  be switched off: LG only allows a settings write as a system notification whose action
+  carries the call, and <b>closing that notification is what executes the write</b>. So the
+  setting also lands ~2 s after the message, and sending two settings as two simultaneous
+  messages shows two notifications &mdash; put them in one message instead.</p>
 
   <h4>Raw escape hatches</h4>
   <ul>

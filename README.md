@@ -291,6 +291,45 @@ is what the TV really holds (`null` if the read-back itself failed) rather than 
 request. When the two differ the node logs a warning — which is how you catch a value that was
 clamped or landed in a different preset / SDR-HDR slot.
 
+### The notification a picture write puts on screen
+
+Every picture write shows a short notification on the TV **for about 2 seconds**, naming what
+changed in the TV's own menu language:
+
+| Message | On screen (TV set to English / Portuguese) |
+|---|---|
+| `{ "reduceBlueLight": true }` | `Reduce Blue Light on` / `Reduzir a luz azul ligado` |
+| `{ "reduceBlueLight": false }` | `Reduce Blue Light off` / `Reduzir a luz azul desligado` |
+| `{ "brightness": 30 }` | `OLED Pixel Brightness 30%` / `Brilho dos píxeis OLED 30%` |
+| `{ "reduceBlueLight": true, "brightness": 70 }` | `Reduce Blue Light on \| OLED Pixel Brightness 70%` / `Reduzir a luz azul ligado \| Brilho dos píxeis OLED 70%` |
+| `{ "pictureMode": "cinema" }` | `Picture settings updated` / `Definições de imagem atualizadas` |
+
+Settings changed together are piped into one line. Only `reduceBlueLight` and `brightness` are
+named — a `pictureMode` or a raw `picture` key is not spelled out, since listing every key would
+make the line unreadable; a write with none of the named settings in it shows the generic line.
+Lines are capped at 80 characters, which no language's copy reaches (the longest is French at 65),
+so the cap only ever trims an absurd value passed through the raw `picture` escape hatch.
+
+This is not decoration and it cannot be switched off: LG refuses
+`ssap://settings/setSystemSettings` from a paired third-party client, so a settings write has to go
+out as a system notification whose action carries the `luna://` call — and **closing that
+notification is what executes the write**. No notification, no write. Since it is going to be on
+screen anyway, it says what it is doing.
+
+Two consequences worth knowing:
+
+- **The write lands when the notification closes**, so it takes effect ~2 s after the message
+  arrives, and the output message follows it.
+- **One message, one notification.** Send everything in a single message —
+  `{ "brightness": 20, "reduceBlueLight": true }` — and you get one write and one notification
+  naming both changes on one line (`Reduzir a luz azul ligado | Brilho dos píxeis OLED 20%`).
+  Sending the same two settings as two messages at the same time produces two writes and two
+  notifications.
+
+The TV's menu language is read once from `localeInfo` and cached until it reconnects. Copy ships
+for en, pt, es, fr, de, it, nl, pl, sv, da, nb, fi, tr and ru; any other language falls back to
+English, as does a TV that will not report its locale.
+
 **Input `msg.payload`** — raw escape hatches:
 
 | `msg.payload` | Effect |

@@ -844,3 +844,100 @@ test('WebosTv.getSystemSettings reads directly (no alert needed)', async () => {
   }]);
   assert.deepStrictEqual(res.settings, { backlight: 80 });
 });
+
+test('WebosTv.lunaSend labels the alert and holds it, without changing the write order', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'held' });
+  const calls = [];
+  tv.connected = true;
+  tv.request = async (uri, payload) => {
+    calls.push({ uri, payload, at: Date.now() });
+    return uri === 'ssap://system.notifications/createAlert'
+      ? { returnValue: true, alertId: 'ALERT_9' }
+      : { returnValue: true };
+  };
+
+  const started = Date.now();
+  await tv.lunaSend('luna://com.webos.settingsservice/setSystemSettings', { category: 'picture' }, {
+    message: 'Reduzir a luz azul ligado',
+    holdMs: 60,
+  });
+
+  assert.strictEqual(calls[0].payload.message, 'Reduzir a luz azul ligado');
+  // Closing is what fires the write, so the hold must sit *between* the two
+  // calls -- that is the whole reason the toast is readable.
+  assert.strictEqual(calls[0].uri, 'ssap://system.notifications/createAlert');
+  assert.strictEqual(calls[1].uri, 'ssap://system.notifications/closeAlert');
+  assert.ok(calls[1].at - started >= 55, `closeAlert waited (${calls[1].at - started}ms)`);
+  // The action still rides in onclose, exactly as before.
+  assert.strictEqual(calls[0].payload.onclose.uri, 'luna://com.webos.settingsservice/setSystemSettings');
+  assert.strictEqual(calls[0].payload.isSysReq, true);
+});
+
+test('WebosTv.lunaSend defaults to the old blank message and no hold', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'bare' });
+  const calls = [];
+  tv.connected = true;
+  tv.request = async (uri, payload) => {
+    calls.push({ uri, payload });
+    return { returnValue: true, alertId: 'ALERT_0' };
+  };
+
+  const started = Date.now();
+  await tv.lunaSend('luna://x/y', {});
+
+  assert.strictEqual(calls[0].payload.message, ' ', 'raw luna callers are unchanged');
+  assert.ok(Date.now() - started < 50, 'no hold when holdMs is omitted');
+  assert.strictEqual(calls.length, 2);
+});
+
+test('WebosTv.setPictureSettings passes the label and hold through', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'pass' });
+  const sent = [];
+  tv.lunaSend = async (uri, params, options) => { sent.push({ uri, params, options }); return { alertId: 'A' }; };
+
+  await tv.setPictureSettings({ eyeComfortMode: 'on' }, { message: 'Reduce Blue Light on', holdMs: 2000 });
+
+  assert.deepStrictEqual(sent[0].options, { message: 'Reduce Blue Light on', holdMs: 2000 });
+  assert.deepStrictEqual(sent[0].params, { category: 'picture', settings: { eyeComfortMode: 'on' } });
+});
+
+test('WebosTv.uiLanguage reads the menu locale once, and falls back to English', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'locale' });
+  const calls = [];
+  tv.connected = true;
+  tv.request = async (uri, payload) => {
+    calls.push({ uri, payload });
+    return { returnValue: true, settings: { localeInfo: { locales: { UI: 'pt-PT' } } } };
+  };
+
+  assert.strictEqual(await tv.uiLanguage(), 'pt-PT');
+  assert.strictEqual(calls[0].uri, 'ssap://settings/getSystemSettings');
+  // `keys` is mandatory: a bare category is refused, and an unknown key rejects
+  // the whole request, so exactly one known key goes out.
+  assert.deepStrictEqual(calls[0].payload, { category: 'option', keys: ['localeInfo'] });
+
+  assert.strictEqual(await tv.uiLanguage(), 'pt-PT');
+  assert.strictEqual(calls.length, 1, 'cached, not re-read on every write');
+
+  // A refused or malformed read must never break a write -- null means English.
+  const refused = new WebosTv({ host: '127.0.0.1', name: 'refused' });
+  refused.connected = true;
+  refused.request = async () => { throw new Error('Some keys are not allowed for the request'); };
+  assert.strictEqual(await refused.uiLanguage(), null);
+
+  const empty = new WebosTv({ host: '127.0.0.1', name: 'empty' });
+  empty.connected = true;
+  empty.request = async () => ({ returnValue: true, settings: {} });
+  assert.strictEqual(await empty.uiLanguage(), null);
+});
+
+test('WebosTv forgets the cached menu locale on disconnect', async () => {
+  const tv = new WebosTv({ host: '127.0.0.1', name: 'relocale' });
+  tv.connected = true;
+  tv.powerOn = false; // avoid arming the off-grace timer
+  tv._uiLanguage = 'pt-PT';
+
+  tv._handleDisconnect();
+
+  assert.strictEqual(tv._uiLanguage, null, 'a language change self-heals on reconnect');
+});

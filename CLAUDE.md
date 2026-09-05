@@ -351,7 +351,39 @@ remote, the LG app) emit instantly instead of waiting for a poll.
   `ssap://system.notifications/closeAlert` with the returned `alertId`. **Closing** the alert is
   what fires the call, which is why the action is repeated in `onclose` rather than only on the
   button. webOS < 4 doesn't run it from closeAlert (needs the alert opened twice plus an `ENTER`
-  on the remote-input socket) — deliberately unsupported. The alert may flash on screen.
+  on the remote-input socket) — deliberately unsupported.
+- **The alert IS visible, so it carries a real message — and its duration costs write latency.**
+  `message: ' '` was a hide-it attempt that doesn't work on every model; the user reported a blank
+  1–2 s toast on webOS 7.0 (that 1–2 s was never a configured duration — `closeAlert` was called as
+  soon as `createAlert` returned, so what showed was just the TV's render-and-fade outliving it).
+  `lunaSend(uri, params, { message, holdMs })` now takes both, defaulting to `' '`/`0` so the raw
+  `{ luna: … }` escape hatch is unchanged. **Because closing fires the write, `holdMs` delays the
+  write by exactly that long** — readability is bought with latency, which is why only the picture
+  path opts in (`node.toastMs`, default **2000**, not surfaced in the editor like `offGraceMs`/
+  `watchdogMs`; tests pass `0`). Labels live in `lib/webos/picture.js` (`describePictureWrite`,
+  `pickLanguage`, `STRINGS`, and the `KEYS` moved out of `nodes/lg-tv.js` so both files share the
+  key strings). Wording is **LG's own menu name, never our invention** — `eyeComfortMode` is
+  "Reduce Blue Light"/"Reduzir a luz azul", *not* "night mode", so the viewer can find the same
+  toggle in the TV's menus (the user rejected "Night mode" explicitly, and confirmed the sets are
+  **OLED** — so `backlight` is "OLED Pixel Brightness"/"Brilho dos píxeis OLED"; on an LED set the
+  menu name would be "Backlight" instead, one line per language). Settings in one message are
+  **piped**, blue light first: `{reduceBlueLight:true, brightness:70}` → `Reduzir a luz azul ligado
+  | Brilho dos píxeis OLED 70%`. (An earlier version showed only the most relevant one; the user
+  asked for both.) Only the two sugar settings are named — a `pictureMode` or raw key would make
+  the line unreadable, so a write with none of the named settings falls back to the generic line.
+  Lines are capped at `MAX_LENGTH` 80 with an ellipsis, but that is **headroom, not a clipper**:
+  the longest line any language can produce is 65 (French, both settings, 3-digit brightness), and
+  the TV takes a long message happily. The cap only fires for the unvalidated raw `picture` hatch
+  (it takes `backlight: Number.MAX_VALUE` to reach it). A test asserts every language's worst case
+  stays under it, so adding longer copy fails loudly instead of silently truncating.
+  Language comes from `uiLanguage()` → `getSystemSettings('option', ['localeInfo'])`
+  → `locales.UI`, cached and cleared in `_handleDisconnect` so a language change self-heals on
+  reconnect; **best-effort — null falls back to English**, because a locale read must never turn a
+  working write into a failed one. 14 languages ship; anything else is English. **Not verified
+  live yet:** whether `option`/`localeInfo` is readable by a paired client on webOS 7.0, whether a
+  2 s hold renders as a steady toast or the TV fades it early anyway, and whether non-ASCII copy
+  renders. Two concurrent picture messages still show two toasts — the user explicitly declined
+  coalescing here (unlike `lg-ac`), so the documented shape is one message carrying both keys.
   OLED Pixel Brightness is the key **`backlight`** (0-100) in the `picture`
   category — the same category's `brightness` is **Black Level**, not the panel light, so
   `lg-ac`-style sugar `{ brightness: n }` maps to `backlight` (`PICTURE_KEY_BRIGHTNESS`).

@@ -573,3 +573,92 @@ test('lg-tv warns when the TV did not apply a picture setting as sent', () => {
   _warnOnMismatch(node, { backlight: 30 }, { pictureMode: 'expert2' });
   assert.strictEqual(warnings.length, 1);
 });
+
+test('picture write labels use LG menu wording in the TV UI language', () => {
+  const { describePictureWrite, pickLanguage, STRINGS } = require('../lib/webos/picture');
+
+  // LG's own menu name, never "night mode" -- that is what the viewer will find
+  // if they go looking for the same toggle on the TV.
+  assert.strictEqual(describePictureWrite({ eyeComfortMode: 'on' }, 'en-US'), 'Reduce Blue Light on');
+  assert.strictEqual(describePictureWrite({ eyeComfortMode: 'off' }, 'en-US'), 'Reduce Blue Light off');
+  assert.strictEqual(describePictureWrite({ eyeComfortMode: 'on' }, 'pt-PT'), 'Reduzir a luz azul ligado');
+  assert.strictEqual(describePictureWrite({ eyeComfortMode: 'off' }, 'pt-PT'), 'Reduzir a luz azul desligado');
+  assert.strictEqual(describePictureWrite({ eyeComfortMode: 'on' }, 'de-DE'), 'Blaulicht reduzieren ein');
+
+  // Several settings in one message are piped together, so the notification
+  // says everything it did rather than hiding one behind the other.
+  assert.strictEqual(
+    describePictureWrite({ eyeComfortMode: 'on', backlight: 70 }, 'pt-PT'),
+    'Reduzir a luz azul ligado | Brilho dos píxeis OLED 70%',
+  );
+  assert.strictEqual(
+    describePictureWrite({ eyeComfortMode: 'off', backlight: 100 }, 'en-US'),
+    'Reduce Blue Light off | OLED Pixel Brightness 100%',
+  );
+  // Key order in the payload must not change the reading order.
+  assert.strictEqual(
+    describePictureWrite({ backlight: 70, eyeComfortMode: 'on' }, 'pt-PT'),
+    'Reduzir a luz azul ligado | Brilho dos píxeis OLED 70%',
+  );
+  // Settings we do not name are left out rather than making the line unreadable.
+  assert.strictEqual(
+    describePictureWrite({ eyeComfortMode: 'on', pictureMode: 'cinema' }, 'en-US'),
+    'Reduce Blue Light on',
+  );
+
+  assert.strictEqual(describePictureWrite({ backlight: 30 }, 'en-US'), 'OLED Pixel Brightness 30%');
+  assert.strictEqual(describePictureWrite({ backlight: 0 }, 'pt-PT'), 'Brilho dos píxeis OLED 0%');
+
+  // A raw `picture` payload gets labelled too, since the label is derived from
+  // the settings actually being written rather than from the sugar keys.
+  assert.strictEqual(describePictureWrite({ eyeComfortMode: 'on' }, 'pt'), 'Reduzir a luz azul ligado');
+  assert.strictEqual(describePictureWrite({ pictureMode: 'cinema' }, 'en-US'), 'Picture settings updated');
+
+  // Values that cannot be described fall through to the generic line rather
+  // than putting `undefined` on the screen. Only reachable via raw `picture`.
+  assert.strictEqual(describePictureWrite({ eyeComfortMode: 'maybe' }, 'en-US'), 'Picture settings updated');
+  assert.strictEqual(describePictureWrite({ backlight: '30' }, 'en-US'), 'Picture settings updated');
+  assert.strictEqual(describePictureWrite({}, 'en-US'), 'Picture settings updated');
+
+  // Unknown/missing locales fall back to English; the read is best-effort.
+  assert.strictEqual(pickLanguage('pt-PT'), 'pt');
+  assert.strictEqual(pickLanguage('PT'), 'pt');
+  assert.strictEqual(pickLanguage('en_US'), 'en');
+  assert.strictEqual(pickLanguage('ja-JP'), 'en');
+  assert.strictEqual(pickLanguage(null), 'en');
+  assert.strictEqual(pickLanguage(''), 'en');
+  assert.strictEqual(describePictureWrite({ eyeComfortMode: 'on' }, null), 'Reduce Blue Light on');
+
+  // Every shipped language carries all four strings.
+  for (const [lang, s] of Object.entries(STRINGS)) {
+    for (const field of ['blueLight', 'on', 'off', 'brightness', 'picture']) {
+      assert.ok(s[field], `${lang}.${field} is missing`);
+    }
+  }
+});
+
+test('picture labels are capped, but the cap never clips real copy', () => {
+  const { describePictureWrite, STRINGS, MAX_LENGTH } = require('../lib/webos/picture');
+
+  // The cap is headroom, not an active clipper: the worst case any language can
+  // produce (both settings, three-digit brightness) must fit with room to spare.
+  for (const lang of Object.keys(STRINGS)) {
+    const worst = describePictureWrite({ eyeComfortMode: 'on', backlight: 100 }, lang);
+    assert.ok(worst.length <= MAX_LENGTH, `${lang} worst case is ${worst.length} chars: ${worst}`);
+    assert.ok(!worst.endsWith('…'), `${lang} worst case must not be truncated: ${worst}`);
+  }
+
+  // It fires only for the raw `picture` escape hatch, whose values are never
+  // validated -- an absurd one must not put a wall of text on the screen.
+  const absurd = describePictureWrite({ eyeComfortMode: 'on', backlight: Number.MAX_VALUE }, 'pl');
+  assert.strictEqual(absurd.length, MAX_LENGTH);
+  assert.ok(absurd.endsWith('…'));
+});
+
+test('lg-tv exposes the same label builder it uses', () => {
+  const mod = require('../nodes/lg-tv.js');
+  assert.strictEqual(
+    mod._describePictureWrite({ eyeComfortMode: 'off' }, 'pt-PT'),
+    'Reduzir a luz azul desligado',
+  );
+});

@@ -2,6 +2,7 @@
 
 const path = require('path');
 const { WebosTv } = require('../lib/webos/tv');
+const { KEYS, describePictureWrite } = require('../lib/webos/picture');
 const { storageDir, makeLogger } = require('../lib/red-helpers');
 
 function deriveAction(payload) {
@@ -29,11 +30,18 @@ function deriveAction(payload) {
   throw new Error('Cannot derive on/off/toggle from payload');
 }
 
-// On an OLED panel this is "OLED Pixel Brightness". Note that the picture
-// category's own `brightness` key is Black Level, not the panel light.
-const PICTURE_KEY_BRIGHTNESS = 'backlight';
-// "Reduce Blue Light" in the TV's own menus. Values are the strings 'on'/'off'.
-const PICTURE_KEY_BLUE_LIGHT = 'eyeComfortMode';
+// The picture keys live in lib/webos/picture.js, next to the on-screen labels
+// that name them -- both need the same key strings.
+// BRIGHTNESS is `backlight`, the panel light ("OLED Pixel Brightness"): the
+// picture category's own `brightness` key is Black Level, not the panel light.
+// BLUE_LIGHT is `eyeComfortMode`, "Reduce Blue Light" in the TV's own menus,
+// whose values are the strings 'on'/'off'.
+const PICTURE_KEY_BRIGHTNESS = KEYS.BRIGHTNESS;
+const PICTURE_KEY_BLUE_LIGHT = KEYS.BLUE_LIGHT;
+
+// How long the write alert stays on screen. Closing it is what executes the
+// write, so this is also added latency -- see WebosTv.lunaSend.
+const TOAST_MS = 2000;
 
 /**
  * Work out what an incoming payload is asking for. Power control keeps its old
@@ -135,6 +143,9 @@ module.exports = function (RED) {
     node.reconnect = Math.max(parseInt(config.reconnect, 10) || 5, 1) * 1000;
     node.action = config.action || 'msg';
     node.emitInitial = config.emitInitial !== false;
+    // Not surfaced in the editor on purpose, like offGraceMs/watchdogMs: tests
+    // pass 0 to skip the hold.
+    node.toastMs = Number.isFinite(config.toastMs) ? config.toastMs : TOAST_MS;
 
     if (!node.host) {
       node.status({ fill: 'red', shape: 'ring', text: 'no IP' });
@@ -218,7 +229,11 @@ module.exports = function (RED) {
         } else {
           node.status({ fill: 'blue', shape: 'dot', text: command.type + '...' });
           if (command.type === 'picture') {
-            await node.tv.setPictureSettings(command.settings);
+            // The write leaves through an alert the TV shows, so label it with
+            // what is being changed, in the TV's own menu language, and hold it
+            // long enough to read. The hold delays the write by that long.
+            const message = describePictureWrite(command.settings, await node.tv.uiLanguage());
+            await node.tv.setPictureSettings(command.settings, { message, holdMs: node.toastMs });
             const actual = await readBackPictureSettings(node, command.settings);
             msg.payload = { ok: true, settings: command.settings, actual };
             warnOnMismatch(node, command.settings, actual);
@@ -258,3 +273,4 @@ module.exports._deriveAction = deriveAction;
 module.exports._deriveCommand = deriveCommand;
 module.exports._readBackPictureSettings = readBackPictureSettings;
 module.exports._warnOnMismatch = warnOnMismatch;
+module.exports._describePictureWrite = describePictureWrite;
