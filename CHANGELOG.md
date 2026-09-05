@@ -8,6 +8,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Dates are npm publish dates. Versions marked _(unreleased)_ exist in git but were never
 published to npm; their changes reached users in the following release.
 
+## [0.7.4] — 2026-09-05
+
+### Fixed
+
+- **The on-screen notification was always in English, even on a TV that is not.** It asked the TV
+  for `localeInfo`, which LG refuses from a third-party client — verified live on webOS 7.0, where
+  it is rejected under every category tried, as is every other language key. The language is now
+  **guessed from the TV's country**, which *is* readable (`PRT` → Portuguese), so a Portuguese set
+  now reads `Reduzir a luz azul ligado | Brilho dos píxeis OLED 70%`.
+
+### Added
+
+- A **Language** setting on the TV node, since country is only a guess: leave it on
+  *Auto (from TV country)* or pin one of the 14 shipped languages. Useful when a TV's menus are in
+  a different language than its country's.
+
+### Documentation
+
+- **OLED Pixel Brightness cannot be set globally**, and the README now says so. It is stored per
+  picture preset and per SDR/HDR, and the TV changes preset by itself for HDR content, so a value
+  set in one preset stops applying once it switches. Three mitigations are documented: pin
+  `pictureMode` in the same message, re-apply on a schedule, or set the presets by hand once and
+  drive `reduceBlueLight` — which *is* global — from the flow.
+
 ## [0.7.3] — 2026-09-05
 
 ### Changed
@@ -20,17 +44,6 @@ published to npm; their changes reached users in the following release.
   using LG's own menu wording so the viewer can find the same toggle on the TV. Settings changed
   in the same message are piped into one line — `Reduzir a luz azul ligado | Brilho dos píxeis
   OLED 70%`.
-- The language is **guessed from the TV's country**, because LG does not let a third-party client
-  read the menu language — `localeInfo` is refused outright on webOS 7.0, under every category, as
-  is every other language key. The country (`PRT`) is readable and is what gets mapped. Copy ships
-  for en, pt, es, fr, de, it, nl, pl, sv, da, nb, fi, tr and ru; any other country falls back to
-  English. Since it is a guess, the node gained a **Language** setting to pin one explicitly —
-  useful when a TV's menus are in a different language than its country's.
-- Documented that **OLED Pixel Brightness cannot be set globally**: it is stored per picture preset
-  and per SDR/HDR, and the TV changes preset by itself for HDR content, so a value set in one
-  preset stops applying. The README now covers the three mitigations (pin `pictureMode` in the
-  message, re-apply on a schedule, or set the presets by hand and drive `reduceBlueLight` — which
-  *is* global — from the flow).
 - **A picture setting now takes effect ~2 s after the message**, because closing the notification is
   what executes the write, so holding it on screen holds the write. The output message follows it.
   Sending two settings as two simultaneous messages produces two writes and two notifications; put
