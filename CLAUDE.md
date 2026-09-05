@@ -376,19 +376,37 @@ remote, the LG app) emit instantly instead of waiting for a poll.
   the TV takes a long message happily. The cap only fires for the unvalidated raw `picture` hatch
   (it takes `backlight: Number.MAX_VALUE` to reach it). A test asserts every language's worst case
   stays under it, so adding longer copy fails loudly instead of silently truncating.
-  Language comes from `uiLanguage()` → `getSystemSettings('option', ['localeInfo'])`
-  → `locales.UI`, cached and cleared in `_handleDisconnect` so a language change self-heals on
-  reconnect; **best-effort — null falls back to English**, because a locale read must never turn a
-  working write into a failed one. 14 languages ship; anything else is English. **Not verified
-  live yet:** whether `option`/`localeInfo` is readable by a paired client on webOS 7.0, whether a
-  2 s hold renders as a steady toast or the TV fades it early anyway, and whether non-ASCII copy
-  renders. Two concurrent picture messages still show two toasts — the user explicitly declined
+  **The TV will NOT report its menu language — verified live, so we map the country instead.**
+  `localeInfo` is refused (`Some keys are not allowed for the request. ( localeInfo )`) under
+  categories `option`, `general`, `locale` *and* `localeInfo`; every language-ish key
+  (`audioLanguage`, `subtitleLanguage`, `language`, `languageCode`, `locale`, `menuLanguage`) is
+  refused too; and `ssap://com.webos.settingsservice/getSystemSettings` answers `{}` to everything
+  (it is not a working route on this firmware — don't be fooled that it doesn't *refuse*). Readable:
+  `country` → `"PRT"` and `smartServiceCountryCode3` → `"PRT"`; `getCurrentSWInformation` also gives
+  `country`/`country_group`/model/firmware. So `uiCountry()` reads `option`/`country` and
+  `languageForCountry()` maps it (a **guess** — a Portuguese set with English menus gets Portuguese
+  copy, which is why `config.language` overrides it and IS surfaced in the editor, unlike the other
+  knobs). The first version asked for `localeInfo` and so fell back to English on *every* write —
+  that was the user-reported "toast is in EN even if the TV is on PT". Cached, cleared in
+  `_handleDisconnect`; **best-effort — null falls back to English**, because this must never turn a
+  working write into a failed one. 14 languages ship. **Still not verified live:** whether a 2 s hold
+  renders as a steady toast or the TV fades it early anyway, and whether non-ASCII copy renders. Two concurrent picture messages still show two toasts — the user explicitly declined
   coalescing here (unlike `lg-ac`), so the documented shape is one message carrying both keys.
   OLED Pixel Brightness is the key **`backlight`** (0-100) in the `picture`
   category — the same category's `brightness` is **Black Level**, not the panel light, so
   `lg-ac`-style sugar `{ brightness: n }` maps to `backlight` (`PICTURE_KEY_BRIGHTNESS`).
   Values are per picture preset *and* per SDR/HDR, so pin `pictureMode` in the same call for
   determinism; Energy Saving can clamp them (`energySaving` reads `off` on the test set).
+  **There is no global panel brightness, and `dimension` does not help.** The user asked whether
+  brightness can be set across presets (the TV switches preset on its own for HDR content, so a
+  value set in one preset stops applying). `getSystemSettings` accepts a `dimension`
+  (`{pictureMode:…, hdrStatus:…}`) without complaint but **ignores it**: reads for `vivid`,
+  `standard`, `eco`, `cinema`, `filmMaker`, `expert1` and for `hdrStatus` `none`/`hdr`/
+  `technicolorHdr` all returned the *current* preset's values (`backlight:30`, `contrast:"100"`,
+  while the live preset was `hdrGame`), and the response echoes only `category`, never the
+  dimension. Whether a *write* honours `dimension` is untested (it needs a real write). Documented
+  mitigations instead: pin `pictureMode` in the message, re-apply on a schedule, or set each preset
+  by hand once and drive `reduceBlueLight` (which IS global) from the flow.
   **Verified live** on `HE_DTV_W22O_AFABATPU` / **webOS TV 7.0** (2022, firmware 33.31.68):
   backlight driven 20 → 90 → 20 with the panel following, and the read-back confirming each
   write. So LG's webOS 22+ notification-manager hardening did *not* close this route for the

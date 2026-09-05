@@ -20,10 +20,17 @@ published to npm; their changes reached users in the following release.
   using LG's own menu wording so the viewer can find the same toggle on the TV. Settings changed
   in the same message are piped into one line — `Reduzir a luz azul ligado | Brilho dos píxeis
   OLED 70%`.
-- The menu language is read once from `localeInfo` and cached until the TV reconnects. Copy ships
-  for en, pt, es, fr, de, it, nl, pl, sv, da, nb, fi, tr and ru; anything else falls back to
-  English, as does a TV that will not report its locale — the read is best-effort and can never
-  turn a working write into a failed one.
+- The language is **guessed from the TV's country**, because LG does not let a third-party client
+  read the menu language — `localeInfo` is refused outright on webOS 7.0, under every category, as
+  is every other language key. The country (`PRT`) is readable and is what gets mapped. Copy ships
+  for en, pt, es, fr, de, it, nl, pl, sv, da, nb, fi, tr and ru; any other country falls back to
+  English. Since it is a guess, the node gained a **Language** setting to pin one explicitly —
+  useful when a TV's menus are in a different language than its country's.
+- Documented that **OLED Pixel Brightness cannot be set globally**: it is stored per picture preset
+  and per SDR/HDR, and the TV changes preset by itself for HDR content, so a value set in one
+  preset stops applying. The README now covers the three mitigations (pin `pictureMode` in the
+  message, re-apply on a schedule, or set the presets by hand and drive `reduceBlueLight` — which
+  *is* global — from the flow).
 - **A picture setting now takes effect ~2 s after the message**, because closing the notification is
   what executes the write, so holding it on screen holds the write. The output message follows it.
   Sending two settings as two simultaneous messages produces two writes and two notifications; put

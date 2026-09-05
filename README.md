@@ -326,9 +326,32 @@ Two consequences worth knowing:
   Sending the same two settings as two messages at the same time produces two writes and two
   notifications.
 
-The TV's menu language is read once from `localeInfo` and cached until it reconnects. Copy ships
-for en, pt, es, fr, de, it, nl, pl, sv, da, nb, fi, tr and ru; any other language falls back to
-English, as does a TV that will not report its locale.
+**Language.** LG does not let a third-party client read the TV's menu language — `localeInfo` is
+refused outright on webOS 7.0 — so the language is **guessed from the TV's country**, which *is*
+readable (`PRT` → Portuguese). Copy ships for en, pt, es, fr, de, it, nl, pl, sv, da, nb, fi, tr
+and ru; any other country falls back to English. Because it is a guess, the node has a **Language**
+setting: leave it on *Auto (from TV country)* or pin a language explicitly — worth doing if the TV's
+menus are set to a language other than its country's.
+
+### Brightness is per picture preset — plan for it
+
+`backlight` is stored **per picture preset and separately for SDR/HDR**, and the TV switches preset
+on its own when content changes (HDR material moves it to an HDR preset). A value written while the
+TV is in one preset therefore does not apply once it switches to another. There is no global panel
+brightness to set.
+
+Practical options, in order of how well they hold up:
+
+1. **Pin the preset in the same message** — `{ "pictureMode": "standard", "brightness": 30 }` — so
+   the value always lands in a known preset instead of whichever happened to be active.
+2. **Re-apply on a schedule** (an inject every N minutes, or on the events your flow already reacts
+   to), which corrects the value after the TV has switched presets on its own.
+3. **Set each preset once by hand** on the TV to the brightness you want, then use
+   `reduceBlueLight` from the flow for day/night changes — it is a single global toggle and is not
+   affected by preset switching.
+
+Option 3 is the most reliable if what you actually want is "dimmer at night", because it stops
+fighting the TV's preset logic altogether.
 
 **Input `msg.payload`** — raw escape hatches:
 

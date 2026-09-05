@@ -662,3 +662,25 @@ test('lg-tv exposes the same label builder it uses', () => {
     'Reduzir a luz azul desligado',
   );
 });
+
+test('language is guessed from the TV country, because LG will not report the language', () => {
+  const { languageForCountry } = require('../lib/webos/picture');
+  const mod = require('../nodes/lg-tv.js');
+
+  // Measured live on webOS 7.0: `country` is readable ("PRT"), `localeInfo` is
+  // not. So the country is what we have to map.
+  assert.strictEqual(languageForCountry('PRT'), 'pt');
+  assert.strictEqual(languageForCountry('prt'), 'pt');
+  assert.strictEqual(languageForCountry('BRA'), 'pt');
+  assert.strictEqual(languageForCountry('DEU'), 'de');
+  assert.strictEqual(languageForCountry('JPN'), 'en', 'unmapped country -> English');
+  assert.strictEqual(languageForCountry(null), 'en', 'a failed read -> English');
+  assert.strictEqual(languageForCountry(''), 'en');
+
+  // The end-to-end shape the node uses: country -> language -> label.
+  assert.strictEqual(
+    mod._describePictureWrite({ eyeComfortMode: 'on' }, languageForCountry('PRT')),
+    'Reduzir a luz azul ligado',
+  );
+  assert.strictEqual(mod._languageForCountry('PRT'), 'pt');
+});

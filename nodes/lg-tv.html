@@ -10,7 +10,8 @@
       secure: { value: false },
       reconnect: { value: 5, validate: RED.validators.number() },
       action: { value: 'msg' },
-      emitInitial: { value: true }
+      emitInitial: { value: true },
+      language: { value: '' }
     },
     inputs: 1,
     outputs: 1,
@@ -67,6 +68,27 @@
     </select>
   </div>
   <div class="form-row">
+    <label for="node-input-language"><i class="fa fa-comment"></i> Language</label>
+    <select id="node-input-language" style="width:200px">
+      <option value="">Auto (from TV country)</option>
+      <option value="en">English</option>
+      <option value="pt">Portugu&ecirc;s</option>
+      <option value="es">Espa&ntilde;ol</option>
+      <option value="fr">Fran&ccedil;ais</option>
+      <option value="de">Deutsch</option>
+      <option value="it">Italiano</option>
+      <option value="nl">Nederlands</option>
+      <option value="pl">Polski</option>
+      <option value="sv">Svenska</option>
+      <option value="da">Dansk</option>
+      <option value="nb">Norsk</option>
+      <option value="fi">Suomi</option>
+      <option value="tr">T&uuml;rk&ccedil;e</option>
+      <option value="ru">&#1056;&#1091;&#1089;&#1089;&#1082;&#1080;&#1081;</option>
+    </select>
+    <span style="color:#999;">On-screen notification language</span>
+  </div>
+  <div class="form-row">
     <label for="node-input-emitInitial"><i class="fa fa-play"></i> Initial</label>
     <input type="checkbox" id="node-input-emitInitial" style="display:inline-block; width:auto; vertical-align:top;">
     <span style="color:#999;">Emit the current power state once when deployed</span>
@@ -106,13 +128,20 @@
   <p>Several can be combined in one message &mdash;
   <code>{ "brightness": 90, "reduceBlueLight": false }</code> is applied as a single write.
   Keys inside <code>picture</code> override the shorthands above.</p>
-  <p>Brightness is stored <b>per picture preset</b> (and separately for SDR/HDR), so set
-  <code>pictureMode</code> in the same message when it has to be deterministic. Energy
-  Saving can clamp or override the value. Note that the picture category's own
+  <p>Brightness is stored <b>per picture preset</b> (and separately for SDR/HDR), and the TV
+  switches preset by itself when content changes &mdash; HDR material moves it to an HDR preset,
+  where a brightness you set earlier does not apply. There is no global panel brightness. Either
+  pin the preset in the same message (<code>{ "pictureMode": "standard", "brightness": 30 }</code>),
+  re-apply on a schedule, or set each preset once by hand on the TV and use
+  <code>reduceBlueLight</code> from the flow instead &mdash; that one is global. Energy
+  Saving can also clamp the value. Note that the picture category's own
   <code>brightness</code> key is Black Level, not the panel light &mdash; that is why
   <code>{ "brightness": n }</code> maps to <code>backlight</code>.</p>
+  <p>The <b>Language</b> setting picks the notification language. LG will not tell a third-party
+  client the TV's menu language, so <i>Auto</i> guesses from the TV's country; pin a language if
+  the menus are set to something else.</p>
   <p>A picture write puts a notification on the TV for about <b>2 seconds</b> naming what
-  changed, in the TV's menu language &mdash; <code>Reduce Blue Light on</code>,
+  changed, in the TV's language &mdash; <code>Reduce Blue Light on</code>,
   <code>OLED Pixel Brightness 30%</code>, or both piped together when one message changes
   both: <code>Reduzir a luz azul ligado | Brilho dos píxeis OLED 70%</code>. It cannot
   be switched off: LG only allows a settings write as a system notification whose action

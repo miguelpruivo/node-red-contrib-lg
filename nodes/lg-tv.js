@@ -2,7 +2,7 @@
 
 const path = require('path');
 const { WebosTv } = require('../lib/webos/tv');
-const { KEYS, describePictureWrite } = require('../lib/webos/picture');
+const { KEYS, describePictureWrite, languageForCountry } = require('../lib/webos/picture');
 const { storageDir, makeLogger } = require('../lib/red-helpers');
 
 function deriveAction(payload) {
@@ -146,6 +146,9 @@ module.exports = function (RED) {
     // Not surfaced in the editor on purpose, like offGraceMs/watchdogMs: tests
     // pass 0 to skip the hold.
     node.toastMs = Number.isFinite(config.toastMs) ? config.toastMs : TOAST_MS;
+    // Blank = guess from the TV's country. LG will not report the menu language
+    // to a third-party client, so the guess can be wrong -- hence the override.
+    node.language = config.language || '';
 
     if (!node.host) {
       node.status({ fill: 'red', shape: 'ring', text: 'no IP' });
@@ -232,7 +235,8 @@ module.exports = function (RED) {
             // The write leaves through an alert the TV shows, so label it with
             // what is being changed, in the TV's own menu language, and hold it
             // long enough to read. The hold delays the write by that long.
-            const message = describePictureWrite(command.settings, await node.tv.uiLanguage());
+            const language = node.language || languageForCountry(await node.tv.uiCountry());
+            const message = describePictureWrite(command.settings, language);
             await node.tv.setPictureSettings(command.settings, { message, holdMs: node.toastMs });
             const actual = await readBackPictureSettings(node, command.settings);
             msg.payload = { ok: true, settings: command.settings, actual };
@@ -274,3 +278,4 @@ module.exports._deriveCommand = deriveCommand;
 module.exports._readBackPictureSettings = readBackPictureSettings;
 module.exports._warnOnMismatch = warnOnMismatch;
 module.exports._describePictureWrite = describePictureWrite;
+module.exports._languageForCountry = languageForCountry;

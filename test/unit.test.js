@@ -901,43 +901,45 @@ test('WebosTv.setPictureSettings passes the label and hold through', async () =>
   assert.deepStrictEqual(sent[0].params, { category: 'picture', settings: { eyeComfortMode: 'on' } });
 });
 
-test('WebosTv.uiLanguage reads the menu locale once, and falls back to English', async () => {
+test('WebosTv.uiCountry reads the country once, and falls back to English', async () => {
   const tv = new WebosTv({ host: '127.0.0.1', name: 'locale' });
   const calls = [];
   tv.connected = true;
   tv.request = async (uri, payload) => {
     calls.push({ uri, payload });
-    return { returnValue: true, settings: { localeInfo: { locales: { UI: 'pt-PT' } } } };
+    return { returnValue: true, settings: { country: 'PRT' } };
   };
 
-  assert.strictEqual(await tv.uiLanguage(), 'pt-PT');
+  assert.strictEqual(await tv.uiCountry(), 'PRT');
   assert.strictEqual(calls[0].uri, 'ssap://settings/getSystemSettings');
-  // `keys` is mandatory: a bare category is refused, and an unknown key rejects
+  // `country` and NOT `localeInfo`: measured live on webOS 7.0, localeInfo is
+  // refused ("Some keys are not allowed for the request"), which made every
+  // label fall back to English. `keys` is mandatory and one unknown key rejects
   // the whole request, so exactly one known key goes out.
-  assert.deepStrictEqual(calls[0].payload, { category: 'option', keys: ['localeInfo'] });
+  assert.deepStrictEqual(calls[0].payload, { category: 'option', keys: ['country'] });
 
-  assert.strictEqual(await tv.uiLanguage(), 'pt-PT');
+  assert.strictEqual(await tv.uiCountry(), 'PRT');
   assert.strictEqual(calls.length, 1, 'cached, not re-read on every write');
 
   // A refused or malformed read must never break a write -- null means English.
   const refused = new WebosTv({ host: '127.0.0.1', name: 'refused' });
   refused.connected = true;
   refused.request = async () => { throw new Error('Some keys are not allowed for the request'); };
-  assert.strictEqual(await refused.uiLanguage(), null);
+  assert.strictEqual(await refused.uiCountry(), null);
 
   const empty = new WebosTv({ host: '127.0.0.1', name: 'empty' });
   empty.connected = true;
   empty.request = async () => ({ returnValue: true, settings: {} });
-  assert.strictEqual(await empty.uiLanguage(), null);
+  assert.strictEqual(await empty.uiCountry(), null);
 });
 
-test('WebosTv forgets the cached menu locale on disconnect', async () => {
+test('WebosTv forgets the cached country on disconnect', async () => {
   const tv = new WebosTv({ host: '127.0.0.1', name: 'relocale' });
   tv.connected = true;
   tv.powerOn = false; // avoid arming the off-grace timer
-  tv._uiLanguage = 'pt-PT';
+  tv._uiCountry = 'PRT';
 
   tv._handleDisconnect();
 
-  assert.strictEqual(tv._uiLanguage, null, 'a language change self-heals on reconnect');
+  assert.strictEqual(tv._uiCountry, null, 'a change self-heals on reconnect');
 });
